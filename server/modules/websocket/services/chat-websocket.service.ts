@@ -95,6 +95,18 @@ export type ProviderRuntimeGateway = SideQuestionRuntime & {
 type ChatWebSocketDependencies = {
   /** Central dispatcher for every provider SDK/CLI runtime. */
   runtime: ProviderRuntimeGateway;
+  /**
+   * Called with a failed run's raw error text whenever one completes with a
+   * thrown error, so the composition root (`server/index.ts`) can decide
+   * whether it was a subscription/rate limit and trigger an automatic
+   * handoff to a fallback backend — kept out of this module as a callback,
+   * not a direct import, so the websocket module never depends on the
+   * handoff module (which itself depends on this module for
+   * `runDetachedChatTurn`, and a direct import either way would cycle).
+   * Errors from the callback itself are swallowed: a handoff failing must
+   * never turn into a second failure for the run that already failed.
+   */
+  onRunFailed?(input: { provider: LLMProvider; sessionId: string; userId: string | number | null; message: string }): void;
 };
 
 /**
@@ -315,6 +327,11 @@ async function dispatchRun(
   } catch (error) {
     failure = error instanceof Error ? error.message : String(error);
     console.error(`[Chat] Provider runtime "${provider}" failed`, { sessionId, error: failure });
+    try {
+      dependencies.onRunFailed?.({ provider, sessionId, userId, message: failure });
+    } catch (hookError) {
+      console.error('[Chat] onRunFailed hook threw', { sessionId, error: hookError });
+    }
   } finally {
     // Safety net: a runtime that crashed (or resolved) without emitting its
     // terminal `complete` would otherwise leave the session stuck in
