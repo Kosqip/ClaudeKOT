@@ -12,11 +12,13 @@ import cors from 'cors';
 import { AppError, findApplicationRoot, getModuleDirectory, IS_PLATFORM, terminalTextStyles } from '@/shared/utils.js';
 import {
     closeSessionsWatcher,
+    detectProviderLimit,
     initializeSessionsWatcher,
     providerRuntimeService,
     reapOrphanedOpenCodeServers,
 } from '@/modules/providers/index.js';
 import { chatRunRegistry, createWebSocketServer } from '@/modules/websocket/index.js';
+import { handoffSessionOnLimit } from '@/modules/handoff/index.js';
 
 import { getConnectableHost } from '../shared/networkHosts.js';
 
@@ -106,6 +108,52 @@ const agentRoutes = createAgentModule({
 // (agents, workflows, backgrounded commands) is still reporting through it.
 chatRunRegistry.setRetentionGuard((sessionId) => providerRuntimeService.hasBackgroundWork(sessionId));
 
+/**
+ * Wires live limit detection to automatic handoff: every failed chat run's
+ * raw error text is checked against `detectProviderLimit` for that
+ * provider, and a hit starts a new session on a fallback backend with the
+ * failed session's history carried over (`handoffSessionOnLimit`).
+ *
+ * Deliberately a plain function passed into `createWebSocketServer`'s `chat`
+ * dependencies, not a direct import inside the websocket module itself —
+ * the handoff module already imports `runDetachedChatTurn` from the
+ * websocket module, so a websocket -> handoff import here would cycle.
+ * This composition root is the one place both modules are already wired
+ * together, so it is the only safe place for this call.
+ *
+ * Silently does nothing when no limit is detected, the user id cannot be
+ * read as a number (e.g. an unauthenticated or system-triggered run), or no
+ * fallback backend is installed — `handoffSessionOnLimit` throws in that
+ * last case, which this catches and logs rather than ever surfacing as a
+ * second failure on top of the run that already failed.
+ */
+function handleRunFailureForAutoHandoff(input: { provider: Parameters<typeof detectProviderLimit>[0]; sessionId: string; userId: string | number | null; message: string }): void {
+    const detection = detectProviderLimit(input.provider, { message: input.message });
+    if (!detection.detected) {
+        return;
+    }
+
+    const userId = Number(input.userId);
+    if (!Number.isInteger(userId)) {
+        console.warn('[Handoff] Limit detected but no authenticated user id to hand off under', {
+            sessionId: input.sessionId,
+            provider: input.provider,
+        });
+        return;
+    }
+
+    handoffSessionOnLimit(
+        { fromSessionId: input.sessionId, userId, reason: detection.reason },
+        providerRuntimeService,
+    )
+        .then((result) => {
+            console.log('[Handoff] Auto-continued session on a fallback backend', result);
+        })
+        .catch((error) => {
+            console.error('[Handoff] Auto-handoff failed', { sessionId: input.sessionId, error });
+        });
+}
+
 createWebSocketServer(server, {
     verifyClient: {
         isPlatform: IS_PLATFORM,
@@ -113,6 +161,7 @@ createWebSocketServer(server, {
     },
     chat: {
         runtime: providerRuntimeService,
+        onRunFailed: handleRunFailureForAutoHandoff,
     },
     shell: {
         resolveProviderSessionId: (sessionId, provider) => {
