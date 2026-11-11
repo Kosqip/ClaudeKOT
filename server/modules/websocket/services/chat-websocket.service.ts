@@ -25,6 +25,7 @@ import type {
   LLMProvider,
   ProviderPermissionDecision,
   ProviderRuntimeWriter,
+  RateLimitStatus,
   SideQuestion,
   SideQuestionEvent,
   SideQuestionRuntime,
@@ -107,6 +108,15 @@ type ChatWebSocketDependencies = {
    * never turn into a second failure for the run that already failed.
    */
   onRunFailed?(input: { provider: LLMProvider; sessionId: string; userId: string | number | null; message: string }): void;
+  /**
+   * Called for every `rate_limit_status` message a provider's runtime emits
+   * on its writer — Claude's SDK pushes one whenever claude.ai's utilization
+   * changes, including an `allowed_warning` before any request is rejected.
+   * Lets the composition root drive both a live usage display and an
+   * immediate handoff on `status: 'rejected'`, without this module importing
+   * the handoff module (same cycle-avoidance reasoning as `onRunFailed`).
+   */
+  onRateLimitStatus?(input: { provider: LLMProvider; sessionId: string; userId: string | number | null; status: RateLimitStatus }): void;
 };
 
 /**
@@ -316,6 +326,38 @@ async function dispatchRun(
     projectPath: session.project_path ?? clientOptions.projectPath,
   };
 
+  // Thin passthrough over `run.writer`: every message still reaches the real
+  // writer unchanged, but a `rate_limit_status` message is also handed to
+  // `onRateLimitStatus` so the composition root can react (live usage
+  // display, or an immediate handoff on `status: 'rejected'`) without
+  // waiting for the run to actually throw — Claude's SDK can report a
+  // rejection as this message with the run otherwise still settling normally.
+  const writerWithLimitSignal: ProviderRuntimeWriter = {
+    // Explicit delegation, not a `{ ...run.writer }` spread: `run.writer` is
+    // a class instance, and spreading would copy its methods detached from
+    // `this`, breaking any internal `this.foo` reference the moment they are
+    // called on this plain wrapper object instead of the instance.
+    send(data: unknown) {
+      run.writer.send(data);
+      const message = data as AnyRecord;
+      if (message?.kind === 'rate_limit_status' && message.rateLimitStatus) {
+        try {
+          dependencies.onRateLimitStatus?.({
+            provider,
+            sessionId,
+            userId,
+            status: message.rateLimitStatus as RateLimitStatus,
+          });
+        } catch (hookError) {
+          console.error('[Chat] onRateLimitStatus hook threw', { sessionId, error: hookError });
+        }
+      }
+    },
+    setSessionId: run.writer.setSessionId ? (id: string) => run.writer.setSessionId!(id) : undefined,
+    userId: run.writer.userId,
+    isWebSocketWriter: run.writer.isWebSocketWriter,
+  };
+
   let failure: string | null = null;
   try {
     // Runs only now that the session is reserved, because an edit rewinds the
@@ -323,7 +365,7 @@ async function dispatchRun(
     // be taken back. Inside the try so a rewind that throws still releases the
     // run instead of leaving the session processing forever.
     await beforeRun?.(run);
-    await dependencies.runtime.run(provider, command, runtimeOptions, run.writer);
+    await dependencies.runtime.run(provider, command, runtimeOptions, writerWithLimitSignal);
   } catch (error) {
     failure = error instanceof Error ? error.message : String(error);
     console.error(`[Chat] Provider runtime "${provider}" failed`, { sessionId, error: failure });

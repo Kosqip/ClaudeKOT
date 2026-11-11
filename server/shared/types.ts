@@ -228,7 +228,8 @@ export type MessageKind =
   | 'session_created'
   | 'history_truncated'
   | 'task_notification'
-  | 'task_status';
+  | 'task_status'
+  | 'rate_limit_status';
 
 /**
  * Event kinds added by the chat gateway layer on top of provider message kinds.
@@ -528,6 +529,8 @@ export type NormalizedMessage = {
   status?: string;
   summary?: string;
   tokenBudget?: unknown;
+  /** Present only on `kind: 'rate_limit_status'`; see `RateLimitStatus`. */
+  rateLimitStatus?: RateLimitStatus;
   /**
    * Timeline of everything a subagent did, attached to the `tool_use` that
    * spawned it. Present for Claude `Agent`/`Task` calls and Codex
@@ -1879,4 +1882,23 @@ export type LimitHandoffResult = {
   toSessionId: string;
   toProvider: LLMProvider;
   reason: ProviderLimitReason;
+};
+
+/**
+ * Claude's own live rate-limit utilization, carried on a `rate_limit_status`
+ * `NormalizedMessage` so the UI can show a usage percentage without the app
+ * polling a separate endpoint — Claude's SDK pushes `rate_limit_event`
+ * whenever this changes, including before any request is actually rejected
+ * (`status: 'allowed_warning'`), not only at the hard stop.
+ *
+ * Mirrors `SDKRateLimitInfo` (`@anthropic-ai/claude-agent-sdk`, `sdk.d.ts`)
+ * narrowed to the fields this app currently surfaces; see
+ * `claude-runtime.provider.ts` for where the raw SDK event is read.
+ */
+export type RateLimitStatus = {
+  status: 'allowed' | 'allowed_warning' | 'rejected';
+  rateLimitType?: ProviderLimitReason;
+  /** Fraction of the window used, 0–1, when the SDK reports one. */
+  utilization?: number;
+  resetsAt?: string;
 };

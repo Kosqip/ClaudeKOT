@@ -154,6 +154,49 @@ function handleRunFailureForAutoHandoff(input: { provider: Parameters<typeof det
         });
 }
 
+/**
+ * Claude's SDK pushes a `rate_limit_status` message whenever claude.ai's
+ * utilization changes, including `status: 'allowed_warning'` well before any
+ * request is actually rejected. Only `'rejected'` triggers the automatic
+ * handoff here; `'allowed'`/`'allowed_warning'` are logged for now as the
+ * foundation of a future live usage display (the structured `utilization`
+ * fraction and `resetsAt` are already on the message) but intentionally
+ * cause no action — handing off before a request is actually blocked would
+ * abandon sessions that would have gone through fine.
+ */
+function handleRateLimitStatusForAutoHandoff(input: { provider: Parameters<typeof detectProviderLimit>[0]; sessionId: string; userId: string | number | null; status: { status: string; rateLimitType?: string; utilization?: number; resetsAt?: string } }): void {
+    if (input.status.status !== 'rejected') {
+        return;
+    }
+
+    const detection = detectProviderLimit(input.provider, {
+        claudeRateLimitInfo: { status: input.status.status, rateLimitType: input.status.rateLimitType },
+    });
+    if (!detection.detected) {
+        return;
+    }
+
+    const userId = Number(input.userId);
+    if (!Number.isInteger(userId)) {
+        console.warn('[Handoff] Limit detected but no authenticated user id to hand off under', {
+            sessionId: input.sessionId,
+            provider: input.provider,
+        });
+        return;
+    }
+
+    handoffSessionOnLimit(
+        { fromSessionId: input.sessionId, userId, reason: detection.reason },
+        providerRuntimeService,
+    )
+        .then((result) => {
+            console.log('[Handoff] Auto-continued session on a fallback backend', result);
+        })
+        .catch((error) => {
+            console.error('[Handoff] Auto-handoff failed', { sessionId: input.sessionId, error });
+        });
+}
+
 createWebSocketServer(server, {
     verifyClient: {
         isPlatform: IS_PLATFORM,
@@ -162,6 +205,7 @@ createWebSocketServer(server, {
     chat: {
         runtime: providerRuntimeService,
         onRunFailed: handleRunFailureForAutoHandoff,
+        onRateLimitStatus: handleRateLimitStatusForAutoHandoff,
     },
     shell: {
         resolveProviderSessionId: (sessionId, provider) => {

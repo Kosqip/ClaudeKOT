@@ -1643,6 +1643,34 @@ async function queryClaudeSDK(
         // session_id already captured
       }
 
+      // The SDK pushes this whenever claude.ai's rate-limit utilization
+      // changes, including an `allowed_warning` before any request is
+      // actually rejected — not only at the hard stop. Forwarded as its own
+      // message kind (rather than folded into an error) so the UI can show a
+      // live usage percentage, and so `detectProviderLimit` gets the
+      // structured `rate_limit_info` instead of only free text once a
+      // request fails outright.
+      if (message.type === 'rate_limit_event') {
+        const info = message.rate_limit_info as AnyRecord | undefined;
+        const knownWindow = info?.rateLimitType === 'five_hour'
+          || info?.rateLimitType === 'seven_day'
+          || info?.rateLimitType === 'seven_day_opus'
+          || info?.rateLimitType === 'seven_day_sonnet'
+          ? info.rateLimitType
+          : undefined;
+        ws.send(createNormalizedMessage({
+          kind: 'rate_limit_status',
+          sessionId: capturedSessionId || sessionId || null,
+          provider: 'claude',
+          rateLimitStatus: {
+            status: info?.status ?? 'allowed',
+            rateLimitType: knownWindow,
+            utilization: typeof info?.utilization === 'number' ? info.utilization : undefined,
+            resetsAt: typeof info?.resetsAt === 'number' ? new Date(info.resetsAt).toISOString() : undefined,
+          },
+        }));
+      }
+
       // The follow-up turn for unread steered messages has started; its own
       // `result` ends the run.
       if (steerFollowUpTimer && message.type === 'system' && message.subtype === 'init') {
