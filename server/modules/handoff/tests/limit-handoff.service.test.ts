@@ -1,10 +1,15 @@
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
 
 import {
   DEFAULT_FALLBACK_ORDER,
   pickFallbackProvider,
   renderHistoryAsText,
+  writeHandoffContextFile,
 } from '@/modules/handoff/services/limit-handoff.service.js';
 import type { ProviderRuntimeGateway } from '@/modules/websocket/index.js';
 
@@ -54,4 +59,18 @@ test('renderHistoryAsText labels user and assistant turns and skips empty conten
 
 test('renderHistoryAsText returns an empty string for no messages', () => {
   assert.equal(renderHistoryAsText([]), '');
+});
+
+test('writeHandoffContextFile writes the rendered history and returns an absolute, readable path', async () => {
+  const toSessionId = randomUUID();
+  const filePath = await writeHandoffContextFile(toSessionId, 'User: Fix the bug\n\nAssistant: Done.');
+
+  assert.ok(path.isAbsolute(filePath));
+  assert.equal(path.dirname(filePath), path.join(os.homedir(), '.cloudcli', 'handoff-context'));
+  assert.equal(await readFile(filePath, 'utf8'), 'User: Fix the bug\n\nAssistant: Done.');
+});
+
+test('writeHandoffContextFile writes a placeholder instead of an empty file when there is no history', async () => {
+  const filePath = await writeHandoffContextFile(randomUUID(), '');
+  assert.equal(await readFile(filePath, 'utf8'), '(no prior messages)');
 });

@@ -1,4 +1,7 @@
 import { randomUUID } from 'node:crypto';
+import { mkdir, writeFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 
 import { sessionsDb } from '@/modules/database/index.js';
 import { mapClaudeRateLimitType, sessionsService } from '@/modules/providers/index.js';
@@ -73,6 +76,38 @@ export function renderHistoryAsText(messages: Array<{ role?: 'user' | 'assistant
     .join('\n\n');
 }
 
+/**
+ * Where a handoff's rendered history is written for the fallback session to
+ * read, one file per `toSessionId` — never inlined into the opening message
+ * itself. A long conversation inlined directly into a prompt risks blowing
+ * past the fallback provider's own context window before the user's actual
+ * request is even reached; pointing at a file the fallback CLI reads with
+ * its own file tool (as `~/.cloudcli` already does for OpenRouter's session
+ * history — see `openrouter-history.store.ts`) keeps the opening message
+ * itself small regardless of how long the original conversation was.
+ *
+ * Assumes the fallback provider's file tool can read an absolute path
+ * outside the project directory, which holds for Claude Code and Codex as
+ * run by this app today; revisit if a future provider sandboxes file reads
+ * to the project root only.
+ */
+const HANDOFF_CONTEXT_DIR = path.join(os.homedir(), '.cloudcli', 'handoff-context');
+
+/**
+ * Writes one handoff's rendered history to its own file and returns the
+ * absolute path, creating the directory on first use.
+ *
+ * Exported for `handoffSessionOnLimit` (above, the only real caller) and for
+ * this module's own tests, which verify the file is actually written and
+ * readable rather than only checking the opening message's text.
+ */
+export async function writeHandoffContextFile(toSessionId: string, historyText: string): Promise<string> {
+  await mkdir(HANDOFF_CONTEXT_DIR, { recursive: true });
+  const filePath = path.join(HANDOFF_CONTEXT_DIR, `${toSessionId}.md`);
+  await writeFile(filePath, historyText || '(no prior messages)', 'utf8');
+  return filePath;
+}
+
 const REASON_LABEL: Record<ProviderLimitReason, string> = {
   five_hour: 'the 5-hour usage limit',
   seven_day: 'the weekly usage limit',
@@ -103,13 +138,15 @@ export function pickFallbackProvider(
  * call this).
  *
  * Reads the full history of `fromSessionId`, opens a brand-new app session
- * for the chosen fallback provider in the same project, and starts its first
- * turn with that history rendered as plain text plus a short note identifying
- * the reason — the fallback provider never receives any of the original
- * provider's native session state, auth, or process, only an ordinary first
- * message. This is intentionally the same path (`runDetachedChatTurn`) every
- * other turn in the app goes through; no provider's subprocess spawning or
- * credential handling is touched here.
+ * for the chosen fallback provider in the same project, writes that history
+ * to its own file (`writeHandoffContextFile`, not inlined into the prompt —
+ * see its doc comment), and starts the new session's first turn with a short
+ * note identifying the reason and the file's path — the fallback provider
+ * never receives any of the original provider's native session state, auth,
+ * or process, only an ordinary first message pointing at a file. This is
+ * intentionally the same path (`runDetachedChatTurn`) every other turn in
+ * the app goes through; no provider's subprocess spawning or credential
+ * handling is touched here.
  *
  * Consumed by whatever layer first wires live limit detection into a running
  * chat turn (not yet done — see the handoff module's README/report); callable
@@ -153,10 +190,11 @@ export async function handoffSessionOnLimit(
     fromSession.custom_name ? `${fromSession.custom_name} (continued)` : undefined,
   );
 
+  const contextFilePath = await writeHandoffContextFile(toSessionId, historyText);
+
   const openingMessage = [
     `[Continued automatically: the previous backend hit ${REASON_LABEL[input.reason]}.]`,
-    historyText ? `Prior conversation so far:\n\n${historyText}` : '(no prior messages)',
-    'Please continue from here.',
+    `The prior conversation is saved at ${contextFilePath} — read it first, then continue from where it leaves off.`,
   ].join('\n\n');
 
   const dispatch = await runDetachedChatTurn(
