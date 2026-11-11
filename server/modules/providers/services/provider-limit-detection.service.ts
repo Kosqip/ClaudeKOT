@@ -18,6 +18,21 @@ const CLAUDE_RATE_LIMIT_TYPE_TO_REASON: Partial<Record<string, 'five_hour' | 'se
 };
 
 /**
+ * Maps Claude's `SDKRateLimitInfo.rateLimitType` to this app's reason
+ * vocabulary, falling back to the generic `rate_limit` for a window Claude
+ * reports that this app does not name individually (e.g. an overage state).
+ *
+ * Exported for the handoff module's proactive threshold path, which decides
+ * to hand off from a live `rate_limit_status` message's `utilization`
+ * before the window is actually exhausted — `detectProviderLimit` below only
+ * ever fires on `status: 'rejected'`, so a proactive handoff needs this
+ * mapping directly rather than going through it.
+ */
+export function mapClaudeRateLimitType(rateLimitType: string | undefined): 'five_hour' | 'seven_day' | 'seven_day_opus' | 'seven_day_sonnet' | 'rate_limit' {
+  return (rateLimitType ? CLAUDE_RATE_LIMIT_TYPE_TO_REASON[rateLimitType] : undefined) ?? 'rate_limit';
+}
+
+/**
  * Codex's SDK (`@openai/codex-sdk`) gives only a free-text `message` on its
  * `ThreadError`/`ErrorItem` — no structured error code. OpenAI's own rate
  * limit responses use these phrasings as of the SDK version pinned in

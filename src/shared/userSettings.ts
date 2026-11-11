@@ -29,7 +29,22 @@ export type UserPreferences = {
   codeEditorSettings: unknown;
   uiPreferences: unknown;
   selectedProvider: string;
+  /**
+   * The claude.ai 5-hour/weekly utilization percentage, read from Claude's
+   * own `rate_limit_event`, at which the handoff module automatically
+   * continues a session on a fallback backend. `100` restricts it to a hard
+   * rejection only (the old, non-proactive behavior); 95/90/85/80 switch
+   * proactively before the window is actually exhausted. Defaults to a
+   * proactive `90` — see `DEFAULT_HANDOFF_THRESHOLD_PERCENT`.
+   */
+  handoffThresholdPercent: number;
 };
+
+/** Mirrors the backend's identically-named constant; kept in sync by hand. */
+export const DEFAULT_HANDOFF_THRESHOLD_PERCENT = 90;
+
+/** The selectable thresholds the settings UI offers, highest (least proactive) first. */
+export const HANDOFF_THRESHOLD_OPTIONS = [100, 95, 90, 85, 80] as const;
 
 export type UserPreferenceKey = keyof UserPreferences;
 
@@ -70,6 +85,8 @@ const LEGACY_STORAGE_KEYS: Record<UserPreferenceKey, string> = {
   codeEditorSettings: '',
   uiPreferences: 'uiPreferences',
   selectedProvider: 'selected-provider',
+  // New: never had a legacy localStorage key.
+  handoffThresholdPercent: '',
 };
 
 const PREFERENCE_KEYS = Object.keys(LEGACY_STORAGE_KEYS) as UserPreferenceKey[];

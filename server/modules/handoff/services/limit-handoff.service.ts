@@ -1,11 +1,55 @@
 import { randomUUID } from 'node:crypto';
 
 import { sessionsDb } from '@/modules/database/index.js';
-import { sessionsService } from '@/modules/providers/index.js';
+import { mapClaudeRateLimitType, sessionsService } from '@/modules/providers/index.js';
 import type { ProviderRuntimeGateway } from '@/modules/websocket/index.js';
 import { runDetachedChatTurn } from '@/modules/websocket/index.js';
 import { AppError } from '@/shared/utils.js';
-import type { LimitHandoffResult, LLMProvider, ProviderLimitReason } from '@/shared/types.js';
+import type { LimitHandoffResult, LLMProvider, ProviderLimitReason, RateLimitStatus } from '@/shared/types.js';
+
+/**
+ * Utilization percentage, as `RateLimitStatus.utilization * 100`, at which
+ * `shouldHandoffForRateLimitStatus` hands off proactively — before Claude's
+ * SDK actually reports `status: 'rejected'`. `100` disables proactive
+ * handoff entirely (only a hard rejection triggers it, the pre-proactive
+ * behavior); the UI's selectable options are 100/95/90/85/80
+ * (`HANDOFF_THRESHOLD_OPTIONS` in `src/shared/userSettings.ts`, which this
+ * mirrors by hand). Used whenever a user has not set their own
+ * `handoffThresholdPercent` preference.
+ */
+export const DEFAULT_HANDOFF_THRESHOLD_PERCENT = 90;
+
+/**
+ * Decides whether one live `rate_limit_status` reading should trigger a
+ * handoff, and if so, the reason to record.
+ *
+ * A hard `rejected` always hands off regardless of the configured
+ * threshold — that is Claude actually refusing the request, not a
+ * prediction. Below `rejected`, a handoff fires only once `utilization`
+ * (0–1) reaches `thresholdPercent`, and only for `allowed_warning` (a plain
+ * `allowed` at or above the threshold should not occur, but is deliberately
+ * not treated as a trigger either, since Claude itself has not yet flagged
+ * the window as being close to its limit).
+ */
+export function shouldHandoffForRateLimitStatus(
+  status: RateLimitStatus,
+  thresholdPercent: number,
+): { handoff: true; reason: ProviderLimitReason } | { handoff: false } {
+  if (status.status === 'rejected') {
+    return { handoff: true, reason: mapClaudeRateLimitType(status.rateLimitType) };
+  }
+
+  if (
+    status.status === 'allowed_warning'
+    && thresholdPercent < 100
+    && typeof status.utilization === 'number'
+    && status.utilization * 100 >= thresholdPercent
+  ) {
+    return { handoff: true, reason: mapClaudeRateLimitType(status.rateLimitType) };
+  }
+
+  return { handoff: false };
+}
 
 /**
  * Default fallback order consulted when a session's own project has no

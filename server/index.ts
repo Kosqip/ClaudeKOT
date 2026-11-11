@@ -10,6 +10,7 @@ import express, { type NextFunction, type Request, type Response } from 'express
 import cors from 'cors';
 
 import { AppError, findApplicationRoot, getModuleDirectory, IS_PLATFORM, terminalTextStyles } from '@/shared/utils.js';
+import type { LLMProvider, RateLimitStatus } from '@/shared/types.js';
 import {
     closeSessionsWatcher,
     detectProviderLimit,
@@ -18,7 +19,11 @@ import {
     reapOrphanedOpenCodeServers,
 } from '@/modules/providers/index.js';
 import { chatRunRegistry, createWebSocketServer } from '@/modules/websocket/index.js';
-import { handoffSessionOnLimit } from '@/modules/handoff/index.js';
+import {
+    DEFAULT_HANDOFF_THRESHOLD_PERCENT,
+    handoffSessionOnLimit,
+    shouldHandoffForRateLimitStatus,
+} from '@/modules/handoff/index.js';
 
 import { getConnectableHost } from '../shared/networkHosts.js';
 
@@ -58,7 +63,7 @@ import { fileTreeRoutes } from './modules/file-tree/index.js';
 import { worktreesRoutes } from './modules/worktrees/index.js';
 import browserUseMcpRoutes from './modules/browser-use/browser-use-mcp.routes.js';
 import { browserUseService } from './modules/browser-use/browser-use.service.js';
-import { initializeDatabase, sessionsDb } from './modules/database/index.js';
+import { initializeDatabase, sessionsDb, userPreferencesDb } from './modules/database/index.js';
 import { configureWebPush } from './modules/notifications/index.js';
 
 const __dirname = getModuleDirectory(import.meta.url);
@@ -157,40 +162,42 @@ function handleRunFailureForAutoHandoff(input: { provider: Parameters<typeof det
 /**
  * Claude's SDK pushes a `rate_limit_status` message whenever claude.ai's
  * utilization changes, including `status: 'allowed_warning'` well before any
- * request is actually rejected. Only `'rejected'` triggers the automatic
- * handoff here; `'allowed'`/`'allowed_warning'` are logged for now as the
- * foundation of a future live usage display (the structured `utilization`
- * fraction and `resetsAt` are already on the message) but intentionally
- * cause no action — handing off before a request is actually blocked would
- * abandon sessions that would have gone through fine.
+ * request is actually rejected. By default (and whenever the user has not
+ * picked a stricter/looser option in settings), this hands off proactively
+ * once utilization reaches `DEFAULT_HANDOFF_THRESHOLD_PERCENT` — not only on
+ * a hard `rejected` — so a session is already running on a fallback backend
+ * before Claude actually refuses a request. A user who prefers to wait for
+ * the hard stop can set their `handoffThresholdPercent` preference to 100.
  */
-function handleRateLimitStatusForAutoHandoff(input: { provider: Parameters<typeof detectProviderLimit>[0]; sessionId: string; userId: string | number | null; status: { status: string; rateLimitType?: string; utilization?: number; resetsAt?: string } }): void {
-    if (input.status.status !== 'rejected') {
-        return;
-    }
-
-    const detection = detectProviderLimit(input.provider, {
-        claudeRateLimitInfo: { status: input.status.status, rateLimitType: input.status.rateLimitType },
-    });
-    if (!detection.detected) {
-        return;
-    }
-
+function handleRateLimitStatusForAutoHandoff(input: { provider: LLMProvider; sessionId: string; userId: string | number | null; status: RateLimitStatus }): void {
     const userId = Number(input.userId);
     if (!Number.isInteger(userId)) {
-        console.warn('[Handoff] Limit detected but no authenticated user id to hand off under', {
-            sessionId: input.sessionId,
-            provider: input.provider,
-        });
+        // Only a rejected request is worth warning about with no user id to
+        // hand off under — a proactive warning with nobody to act on it is
+        // not actionable and would just be noise in the logs.
+        if (input.status.status === 'rejected') {
+            console.warn('[Handoff] Limit detected but no authenticated user id to hand off under', {
+                sessionId: input.sessionId,
+                provider: input.provider,
+            });
+        }
+        return;
+    }
+
+    const storedThreshold = userPreferencesDb.getPreferences(userId).handoffThresholdPercent;
+    const thresholdPercent = typeof storedThreshold === 'number' ? storedThreshold : DEFAULT_HANDOFF_THRESHOLD_PERCENT;
+
+    const decision = shouldHandoffForRateLimitStatus(input.status, thresholdPercent);
+    if (!decision.handoff) {
         return;
     }
 
     handoffSessionOnLimit(
-        { fromSessionId: input.sessionId, userId, reason: detection.reason },
+        { fromSessionId: input.sessionId, userId, reason: decision.reason },
         providerRuntimeService,
     )
         .then((result) => {
-            console.log('[Handoff] Auto-continued session on a fallback backend', result);
+            console.log('[Handoff] Auto-continued session on a fallback backend', { ...result, thresholdPercent, proactive: input.status.status !== 'rejected' });
         })
         .catch((error) => {
             console.error('[Handoff] Auto-handoff failed', { sessionId: input.sessionId, error });
