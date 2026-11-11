@@ -4,6 +4,10 @@ export { providerMcpService } from './services/mcp.service.js';
 export { providerCapabilitiesService } from './services/provider-capabilities.service.js';
 export { providerRuntimeService } from './services/provider-runtime.service.js';
 
+// detectProviderLimit: used by the handoff module to tell a subscription/rate
+// limit apart from an ordinary runtime failure before switching backends.
+export { detectProviderLimit } from './services/provider-limit-detection.service.js';
+
 // providerModelsService: used by Commands to list models and resolve the active session model.
 export { providerModelsService } from './services/provider-models.service.js';
 

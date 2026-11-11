@@ -1828,3 +1828,55 @@ export type MixDispatchResult = {
   started: boolean;
   error: string | null;
 };
+
+// ---------------------------
+//----------------- PROVIDER LIMIT DETECTION TYPES ------------
+/**
+ * Which usage ceiling a provider reported — distinct reasons so the handoff
+ * module's system message and logs can say *why* it switched, instead of a
+ * generic "limit hit". Sourced from each provider's own vocabulary:
+ * - `five_hour` / `seven_day` / `seven_day_opus` / `seven_day_sonnet`: Claude's
+ *   `SDKRateLimitInfo.rateLimitType` (`@anthropic-ai/claude-agent-sdk`,
+ *   `sdk.d.ts`), reported only when `rate_limit_info.status === 'rejected'`.
+ * - `rate_limit`: Claude's own `SDKAssistantMessageError` literal, or a
+ *   provider whose only signal is a generic 429 (OpenRouter, Codex by text
+ *   match) with no finer-grained window to name.
+ * - `unknown_limit`: the provider's own wording was recognized as a limit
+ *   (e.g. Codex's free-text "usage limit" phrasing) but carries no structured
+ *   window/type field to report more precisely.
+ */
+export type ProviderLimitReason =
+  | 'five_hour'
+  | 'seven_day'
+  | 'seven_day_opus'
+  | 'seven_day_sonnet'
+  | 'rate_limit'
+  | 'unknown_limit';
+
+/**
+ * Result of inspecting one provider's raw error/event for a subscription or
+ * rate limit, as opposed to an ordinary failure (bad auth, network error,
+ * programming bug). `detected: false` means "not recognized as a limit" —
+ * never inferred from a generic catch-all, since a false positive would send
+ * the handoff module hunting for a replacement backend on an unrelated error.
+ */
+export type ProviderLimitDetectionResult =
+  | { detected: true; reason: ProviderLimitReason; resetsAt?: string }
+  | { detected: false };
+
+// ---------------------------
+//----------------- LIMIT HANDOFF TYPES ------------
+/**
+ * One completed handoff: a session that hit a subscription/rate limit on
+ * `fromProvider` and had its conversation continued on `toSessionId`'s
+ * `toProvider`. Returned by the handoff service and shown in the UI as a
+ * system message distinct from an ordinary error, so a user does not mistake
+ * an intentional backend switch for a failure.
+ */
+export type LimitHandoffResult = {
+  fromSessionId: string;
+  fromProvider: LLMProvider;
+  toSessionId: string;
+  toProvider: LLMProvider;
+  reason: ProviderLimitReason;
+};
