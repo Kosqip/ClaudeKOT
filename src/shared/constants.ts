@@ -120,7 +120,7 @@ export const MCP_PROVIDER_NAMES: Record<McpProvider, string> = {
   cursor: 'Cursor',
   codex: 'Codex',
   opencode: 'OpenCode',
-  openrouter: 'OpenRouter',
+  openrouter: 'Custom API',
 };
 
 /** Scopes each provider can install an MCP server into; drives the scope selector and validation. */

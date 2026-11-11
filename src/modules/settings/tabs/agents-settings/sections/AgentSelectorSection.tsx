@@ -13,7 +13,7 @@ const AGENT_NAMES: Record<AgentProvider, string> = {
   cursor: 'Cursor',
   codex: 'Codex',
   opencode: 'OpenCode',
-  openrouter: 'OpenRouter',
+  openrouter: 'Custom API',
 };
 
 /** Rendered by AgentsSettingsTab to pick which agent provider the tab is configuring. */

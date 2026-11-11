@@ -56,8 +56,8 @@ const agentConfig: Record<AgentProvider, AgentVisualConfig> = {
     buttonClass: 'bg-zinc-900 hover:bg-zinc-800 active:bg-zinc-950 dark:bg-zinc-700 dark:hover:bg-zinc-600',
   },
   openrouter: {
-    name: 'OpenRouter',
-    description: 'HTTP API — authenticated via OPENROUTER_API_KEY on the server, no CLI login.',
+    name: 'Custom API',
+    description: 'HTTP API — OpenRouter, direct Anthropic, or direct OpenAI, selected per model by its prefix. Authenticated via an API key env var on the server, no CLI login.',
     bgClass: 'bg-teal-50 dark:bg-teal-900/20',
     borderClass: 'border-teal-200 dark:border-teal-800',
     textClass: 'text-teal-900 dark:text-teal-100',

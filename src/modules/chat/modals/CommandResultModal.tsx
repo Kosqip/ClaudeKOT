@@ -57,7 +57,7 @@ const PROVIDER_LABELS: Record<string, string> = {
   cursor: 'Cursor',
   codex: 'Codex',
   opencode: 'OpenCode',
-  openrouter: 'OpenRouter',
+  openrouter: 'Custom API',
 };
 
 const FALLBACK_COMMANDS: CommandEntry[] = [

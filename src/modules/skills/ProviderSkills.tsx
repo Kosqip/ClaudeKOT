@@ -54,7 +54,7 @@ const PROVIDER_NAMES: Record<SkillsProvider, string> = {
   codex: 'Codex',
   cursor: 'Cursor',
   opencode: 'OpenCode',
-  openrouter: 'OpenRouter',
+  openrouter: 'Custom API',
 };
 
 const PROVIDER_SKILL_PATHS: Record<Exclude<SkillsProvider, 'opencode' | 'openrouter'>, string> = {

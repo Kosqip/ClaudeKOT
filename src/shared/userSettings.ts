@@ -1,5 +1,6 @@
 import { api } from '@/shared/api';
 import { CODE_EDITOR_STORAGE_KEYS } from '@/shared/constants';
+import type { LLMProvider } from '@/shared/types';
 
 /**
  * The one reader and writer for the settings that used to live in browser
@@ -38,10 +39,34 @@ export type UserPreferences = {
    * proactive `90` — see `DEFAULT_HANDOFF_THRESHOLD_PERCENT`.
    */
   handoffThresholdPercent: number;
+  /**
+   * The order the handoff module tries fallback backends in when continuing
+   * a session automatically (see `shouldHandoffForRateLimitStatus`). A
+   * backend absent from this array, or the whole array when the user has
+   * never set it, falls back to `DEFAULT_HANDOFF_FALLBACK_ORDER`. Purely
+   * declarative here — no orchestration logic reads this yet beyond the
+   * handoff module's own fallback selection.
+   */
+  handoffFallbackOrder: LLMProvider[];
+  /**
+   * A role the user has assigned one provider, purely as data today: no
+   * orchestration logic reads this yet. Intended as the configuration input
+   * for a future task-splitting orchestrator (not yet built) — 'orchestrator'
+   * for the backend that plans/delegates, 'hands' for one that executes
+   * delegated work, 'routine' for a cheap default for low-stakes tasks. A
+   * provider absent from this record has no assigned role.
+   */
+  providerRoles: Partial<Record<LLMProvider, 'orchestrator' | 'hands' | 'routine'>>;
 };
 
 /** Mirrors the backend's identically-named constant; kept in sync by hand. */
 export const DEFAULT_HANDOFF_THRESHOLD_PERCENT = 90;
+
+/** Mirrors the backend's identically-named constant; kept in sync by hand. */
+export const DEFAULT_HANDOFF_FALLBACK_ORDER: LLMProvider[] = ['codex', 'claude', 'opencode', 'cursor', 'openrouter'];
+
+/** The provider roles selectable in settings, plus the "no role" empty option. */
+export const PROVIDER_ROLE_OPTIONS = ['', 'orchestrator', 'hands', 'routine'] as const;
 
 /** The selectable thresholds the settings UI offers, highest (least proactive) first. */
 export const HANDOFF_THRESHOLD_OPTIONS = [100, 95, 90, 85, 80] as const;
@@ -87,6 +112,9 @@ const LEGACY_STORAGE_KEYS: Record<UserPreferenceKey, string> = {
   selectedProvider: 'selected-provider',
   // New: never had a legacy localStorage key.
   handoffThresholdPercent: '',
+  // New: never had a legacy localStorage key.
+  handoffFallbackOrder: '',
+  providerRoles: '',
 };
 
 const PREFERENCE_KEYS = Object.keys(LEGACY_STORAGE_KEYS) as UserPreferenceKey[];

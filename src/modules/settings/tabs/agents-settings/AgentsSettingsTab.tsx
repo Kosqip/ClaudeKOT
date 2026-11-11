@@ -4,7 +4,8 @@ import type { AgentCategory, AgentContextByProvider, AgentProvider, AgentSetting
 import AgentCategoryContentSection from '@/modules/settings/tabs/agents-settings/sections/AgentCategoryContentSection';
 import AgentCategoryTabsSection from '@/modules/settings/tabs/agents-settings/sections/AgentCategoryTabsSection';
 import AgentSelectorSection from '@/modules/settings/tabs/agents-settings/sections/AgentSelectorSection';
-import { HandoffThresholdSetting } from '@/modules/handoff';
+import { HandoffFallbackOrderSetting, HandoffThresholdSetting } from '@/modules/handoff';
+import { ProviderRolesSettings } from '@/modules/provider-roles';
 
 type ProviderAuthStatusByProvider = Record<AgentProvider, ProviderAuthStatus>;
 
@@ -118,6 +119,8 @@ export default function AgentsSettingsTab({
         />
 
         <HandoffThresholdSetting />
+        <HandoffFallbackOrderSetting />
+        <ProviderRolesSettings />
       </div>
     </div>
   );
