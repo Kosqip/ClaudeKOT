@@ -313,8 +313,13 @@ test('providerMcpService global adder writes to all providers and rejects unsupp
       workspacePath,
     });
 
-    assert.equal(globalResult.length, 4);
-    assert.ok(globalResult.every((entry) => entry.created === true));
+    assert.equal(globalResult.length, 5);
+    // OpenRouter is a stateless HTTP backend with no MCP config to write to.
+    const byProvider = new Map(globalResult.map((entry) => [entry.provider, entry]));
+    assert.equal(byProvider.get('openrouter')?.created, false);
+    for (const provider of ['claude', 'codex', 'cursor', 'opencode'] as const) {
+      assert.equal(byProvider.get(provider)?.created, true);
+    }
 
     const claudeProject = await readJson(path.join(workspacePath, '.mcp.json'));
     assert.ok((claudeProject.mcpServers as Record<string, unknown>)['global-http']);
