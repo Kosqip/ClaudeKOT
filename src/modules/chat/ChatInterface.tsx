@@ -29,6 +29,7 @@ import {
 import ChatMessagesPane from '@/modules/chat/transcript/ChatMessagesPane';
 import ChatComposer from '@/modules/chat/composer/ChatComposer';
 import CommandResultModal from '@/modules/chat/modals/CommandResultModal';
+import { MixSendPanel } from '@/modules/mix';
 
 type ChatInterfaceProps = {
   isActive: boolean;
@@ -623,6 +624,12 @@ function ChatInterface({
           supportsSideQuestions={supportsSideQuestions}
         />
         </div>
+
+        {selectedProject?.sessions && selectedProject.sessions.length >= 2 ? (
+          <div className="px-4 pb-3">
+            <MixSendPanel candidates={selectedProject.sessions} />
+          </div>
+        ) : null}
       </div>
 
       <CommandResultModal
