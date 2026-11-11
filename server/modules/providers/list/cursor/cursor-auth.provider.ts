@@ -1,0 +1,149 @@
+import spawn from 'cross-spawn';
+
+import type { IProviderAuth } from '@/shared/interfaces.js';
+import type { CliVersionProbe, ProviderAuthStatus } from '@/shared/types.js';
+import { probeCliVersion } from '@/shared/utils.js';
+
+type CursorLoginStatus = {
+  authenticated: boolean;
+  email: string | null;
+  method: string | null;
+  error?: string;
+};
+
+// `cursor-agent status` decides "logged in" from the locally stored tokens, then fetches the
+// account details from Cursor's API. That request cannot change the verdict (on failure the CLI
+// still reports logged in), it only adds a network round trip to the CLI's startup (3-6 s on a
+// busy host even when logged out). A 5 s cap reported fresh logins as "Command timeout" (#551).
+const STATUS_TIMEOUT_MS = 20_000;
+
+export class CursorProviderAuth implements IProviderAuth {
+  /**
+   * Checks whether the cursor-agent CLI is available on this host, and which version it is.
+   */
+  checkInstalled(): CliVersionProbe {
+    return probeCliVersion('cursor-agent');
+  }
+
+  /**
+   * Returns Cursor CLI installation and login status.
+   */
+  async getStatus(): Promise<ProviderAuthStatus> {
+    const { installed, version: installedVersion } = this.checkInstalled();
+
+    if (!installed) {
+      return {
+        installed,
+        provider: 'cursor',
+        installedVersion,
+        authenticated: false,
+        email: null,
+        method: null,
+        error: 'Cursor CLI is not installed',
+      };
+    }
+
+    const login = await this.checkCursorLogin();
+
+    return {
+      installed,
+      provider: 'cursor',
+      installedVersion,
+      authenticated: login.authenticated,
+      email: login.email,
+      method: login.method,
+      error: login.authenticated ? undefined : login.error || 'Not logged in',
+    };
+  }
+
+  /**
+   * Runs cursor-agent status and parses the login marker from stdout.
+   */
+  private checkCursorLogin(): Promise<CursorLoginStatus> {
+    return new Promise((resolve) => {
+      let processCompleted = false;
+      let childProcess: ReturnType<typeof spawn> | undefined;
+
+      const timeout = setTimeout(() => {
+        if (!processCompleted) {
+          processCompleted = true;
+          childProcess?.kill();
+          resolve({
+            authenticated: false,
+            email: null,
+            method: null,
+            error: 'Command timeout',
+          });
+        }
+      }, STATUS_TIMEOUT_MS);
+
+      try {
+        childProcess = spawn('cursor-agent', ['status']);
+      } catch {
+        clearTimeout(timeout);
+        processCompleted = true;
+        resolve({
+          authenticated: false,
+          email: null,
+          method: null,
+          error: 'Cursor CLI not found or not installed',
+        });
+        return;
+      }
+
+      let stdout = '';
+      let stderr = '';
+
+      childProcess.stdout?.on('data', (data: Buffer) => {
+        stdout += data.toString();
+      });
+
+      childProcess.stderr?.on('data', (data: Buffer) => {
+        stderr += data.toString();
+      });
+
+      childProcess.on('close', (code) => {
+        if (processCompleted) {
+          return;
+        }
+        processCompleted = true;
+        clearTimeout(timeout);
+
+        if (code === 0) {
+          const emailMatch = stdout.match(/Logged in as ([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/i);
+          if (emailMatch?.[1]) {
+            resolve({ authenticated: true, email: emailMatch[1], method: 'cli' });
+            return;
+          }
+
+          // e.g. "Logged in (unable to fetch user details)" when the account request failed.
+          // There is no email to show, so the UI uses its own fallback label.
+          if (stdout.includes('Logged in')) {
+            resolve({ authenticated: true, email: null, method: 'cli' });
+            return;
+          }
+
+          resolve({ authenticated: false, email: null, method: null, error: 'Not logged in' });
+          return;
+        }
+
+        resolve({ authenticated: false, email: null, method: null, error: stderr || 'Not logged in' });
+      });
+
+      childProcess.on('error', () => {
+        if (processCompleted) {
+          return;
+        }
+        processCompleted = true;
+        clearTimeout(timeout);
+
+        resolve({
+          authenticated: false,
+          email: null,
+          method: null,
+          error: 'Cursor CLI not found or not installed',
+        });
+      });
+    });
+  }
+}

@@ -1,0 +1,286 @@
+import fsSync from 'node:fs';
+import path from 'node:path';
+
+import Database from 'better-sqlite3';
+
+import { sessionsDb } from '@/modules/database/index.js';
+import type { IProviderSessionSynchronizer } from '@/shared/interfaces.js';
+import {
+  getOpenCodeDatabasePath,
+  normalizeProviderTimestamp,
+  normalizeSessionName,
+  readJsonRecord,
+  readOptionalString,
+  unwrapJsonStringLiteral,
+} from '@/shared/utils.js';
+
+import { opencodeSideQuestionForks } from './opencode-side-question-forks.js';
+
+// Opencode sets its own `session.agent` column asynchronously, not from the
+// row's creation (verified live, 2026-10-27), so it alone cannot close the
+// window right after a side question's fork is created. The registry's
+// pending-window clause (below) covers that window by directory, start time
+// and opencode's own `(fork #N)` title suffix; the registry's confirmed-id
+// clause covers a fork once its id is read off the first event; this `agent`
+// column adds a third layer wherever opencode has actually set it by query
+// time. All three sit in the SQL so a fork can never be the newest row that
+// `synchronizeFile`'s `LIMIT 1` picks, not after.
+//
+// Every side question gets a fresh agent name, `sidequestion-<uuid>` (gate F8
+// of the cut-review: a project or global config cannot predict it and so
+// cannot merge permission keys into it); the plain `sidequestion` name is the
+// CLI-era agent, kept here for an older row still on disk. The per-question
+// name is matched by the exact lowercase shape `crypto.randomUUID()` gives,
+// as a GLOB (LIKE has no character classes and ignores case), so neither
+// matches a user's own agent that merely starts with the word, such as
+// `sidequestioner` or `sidequestion-review`.
+const SIDE_QUESTION_AGENT = 'sidequestion';
+const HEX_GLOB = '[0-9a-f]';
+const SIDE_QUESTION_AGENT_GLOB = `sidequestion-${HEX_GLOB.repeat(8)}-${HEX_GLOB.repeat(4)}-${HEX_GLOB.repeat(4)}-${HEX_GLOB.repeat(4)}-${HEX_GLOB.repeat(12)}`;
+
+type OpenCodeSessionRow = {
+  id: string;
+  directory: string | null;
+  title: string | null;
+  time_created: number | null;
+  time_updated: number | null;
+  worktree: string | null;
+};
+
+type SynchronizeRowsResult = {
+  processed: number;
+  firstSessionId: string | null;
+};
+
+type OpenCodeChildSessionRow = {
+  id: string;
+};
+
+/**
+ * Session indexer for OpenCode's SQLite-backed session store.
+ */
+export class OpenCodeSessionSynchronizer implements IProviderSessionSynchronizer {
+  private readonly provider = 'opencode' as const;
+  private childSessionsReconciled = false;
+
+  /**
+   * Scans OpenCode's shared opencode.db and upserts active sessions into DB.
+   */
+  async synchronize(since?: Date): Promise<number> {
+    // The first provider-wide scan also reconciles child rows indexed by older versions.
+    const result = this.synchronizeRows(since, undefined, !this.childSessionsReconciled);
+    return result.processed;
+  }
+
+  /**
+   * Handles watcher changes for opencode.db.
+   */
+  async synchronizeFile(filePath: string): Promise<string | null> {
+    if (path.basename(filePath) !== 'opencode.db') {
+      return null;
+    }
+
+    const result = this.synchronizeRows(undefined, 1);
+    return result.firstSessionId;
+  }
+
+  private synchronizeRows(
+    since?: Date,
+    limit?: number,
+    pruneChildSessions = false,
+  ): SynchronizeRowsResult {
+    const dbPath = getOpenCodeDatabasePath();
+    if (!fsSync.existsSync(dbPath)) {
+      return { processed: 0, firstSessionId: null };
+    }
+
+    const db = new Database(dbPath, { readonly: true, fileMustExist: true });
+    try {
+      if (pruneChildSessions) {
+        this.pruneChildSessions(db);
+        this.childSessionsReconciled = true;
+      }
+
+      const sinceMillis = since?.getTime() ?? null;
+      const limitClause = limit ? 'LIMIT ?' : '';
+      // A snapshot of the registry's current ids, bound as its own
+      // placeholders so the SQL (not a post-query JS filter) is what keeps a
+      // registered fork off the row `synchronizeFile`'s LIMIT 1 picks.
+      const forkIdsClause = this.registeredForkIdsClause();
+      const pendingForkClause = this.pendingForkWindowClause();
+      // Older opencode's `session` table has no `agent` column at all; the
+      // registry filters above/below still cover every fork, so this one is
+      // an extra layer where the column exists and simply absent where it
+      // doesn't, rather than a query that throws and drops every session.
+      const agentFilterClause = this.hasAgentColumn(db)
+        ? `AND (s.agent IS NULL OR (s.agent != '${SIDE_QUESTION_AGENT}' AND s.agent NOT GLOB '${SIDE_QUESTION_AGENT_GLOB}'))`
+        : '';
+      const params = [
+        sinceMillis,
+        sinceMillis,
+        ...forkIdsClause.ids,
+        ...pendingForkClause.params,
+        ...(limit ? [limit] : []),
+      ];
+      const rows = db.prepare(`
+        SELECT
+          s.id AS id,
+          s.directory AS directory,
+          s.title AS title,
+          s.time_created AS time_created,
+          s.time_updated AS time_updated,
+          p.worktree AS worktree
+        FROM session s
+        LEFT JOIN project p ON p.id = s.project_id
+        WHERE s.time_archived IS NULL
+          AND s.parent_id IS NULL
+          AND (? IS NULL OR COALESCE(s.time_updated, s.time_created, 0) >= ?)
+          ${agentFilterClause}
+          ${forkIdsClause.sql}
+          ${pendingForkClause.sql}
+        ORDER BY COALESCE(s.time_updated, s.time_created, 0) DESC, s.id DESC
+        ${limitClause}
+      `).all(...params) as OpenCodeSessionRow[];
+
+      let processed = 0;
+      let firstSessionId: string | null = null;
+      for (const row of rows) {
+        const indexedSessionId = this.upsertSession(db, row);
+        if (!indexedSessionId) {
+          continue;
+        }
+
+        if (!firstSessionId) {
+          firstSessionId = indexedSessionId;
+        }
+        processed += 1;
+      }
+
+      return { processed, firstSessionId };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn('[OpenCodeProvider] Failed to synchronize sessions:', message);
+      return { processed: 0, firstSessionId: null };
+    } finally {
+      db.close();
+    }
+  }
+
+  /** Whether this opened `opencode.db` has a `session.agent` column (absent in older opencode). */
+  private hasAgentColumn(db: Database.Database): boolean {
+    const columns = db.prepare('PRAGMA table_info(session)').all() as { name: string }[];
+    return columns.some((column) => column.name === 'agent');
+  }
+
+  /** `AND s.id NOT IN (...)` for the registry's current ids, or no clause when it is empty. */
+  private registeredForkIdsClause(): { sql: string; ids: string[] } {
+    const ids = opencodeSideQuestionForks.list();
+    if (ids.length === 0) {
+      return { sql: '', ids: [] };
+    }
+    return { sql: `AND s.id NOT IN (${ids.map(() => '?').join(', ')})`, ids };
+  }
+
+  /**
+   * One `NOT (...)` per pending fork, excluding any row in its directory
+   * created at or after its start time whose title ends in opencode's own
+   * `(fork #N)` suffix — the only marker available before a pending fork's id
+   * is read off an event (see opencode-side-question-forks.ts).
+   */
+  private pendingForkWindowClause(): { sql: string; params: Array<string | number> } {
+    const pendingForks = opencodeSideQuestionForks.listPending();
+    if (pendingForks.length === 0) {
+      return { sql: '', params: [] };
+    }
+
+    const clauses = pendingForks
+      .map(() => "NOT (s.directory = ? AND s.time_created >= ? AND s.title LIKE '%(fork #%)')")
+      .join(' AND ');
+    const params = pendingForks.flatMap((fork) => [fork.directory, fork.startedAt]);
+    return { sql: `AND ${clauses}`, params };
+  }
+
+  private pruneChildSessions(db: Database.Database): void {
+    const childSessions = db.prepare(`
+      SELECT id
+      FROM session
+      WHERE parent_id IS NOT NULL
+    `).all() as OpenCodeChildSessionRow[];
+
+    for (const childSession of childSessions) {
+      sessionsDb.deleteSessionByProviderSessionId(childSession.id, this.provider);
+    }
+  }
+
+  private upsertSession(db: Database.Database, row: OpenCodeSessionRow): string | null {
+    const sessionId = readOptionalString(row.id);
+    const projectPath = readOptionalString(row.directory) ?? readOptionalString(row.worktree);
+    if (!sessionId || !projectPath) {
+      return null;
+    }
+
+    const fallbackTitle = 'Untitled OpenCode Session';
+    const pendingAppSession = sessionsDb.getSessionByProviderSessionId(sessionId)
+      ?? sessionsDb.getSessionById(sessionId)
+      ?? sessionsDb.findLatestPendingAppSession(this.provider, projectPath);
+    if (pendingAppSession && !pendingAppSession.provider_session_id) {
+      // Slow networks can let the sqlite watcher index opencode.db before the
+      // runtime reports its provider id back through the websocket mapping.
+      // Bind that id to the fresh app row first so the watcher does not create
+      // a temporary provider-id sidebar entry for the same session.
+      sessionsDb.assignProviderSessionId(pendingAppSession.session_id, sessionId);
+    }
+
+    // App-created sessions are keyed by an app id, so disk-discovered provider
+    // ids must be resolved through the provider-id mapping first.
+    const existingSession = sessionsDb.getSessionByProviderSessionId(sessionId)
+      ?? sessionsDb.getSessionById(sessionId);
+    const existingName = existingSession?.custom_name;
+
+    let nextName: string | undefined;
+    if (existingName && existingName !== fallbackTitle) {
+      nextName = existingName;
+    } else {
+      nextName = readOptionalString(row.title) ?? this.readFirstUserText(db, sessionId);
+    }
+
+    // OpenCode stores every session in one shared sqlite database, so jsonl_path
+    // must stay null to avoid deleting opencode.db when one app session is removed.
+    // Return the canonical stored row id so watcher-triggered sidebar updates
+    // stay on the app session once provider_session_id has already been mapped.
+    return sessionsDb.createSession(
+      sessionId,
+      this.provider,
+      projectPath,
+      normalizeSessionName(nextName, fallbackTitle),
+      normalizeProviderTimestamp(row.time_created),
+      normalizeProviderTimestamp(row.time_updated ?? row.time_created),
+      null,
+    );
+  }
+
+  private readFirstUserText(db: Database.Database, sessionId: string): string | undefined {
+    try {
+      const row = db.prepare(`
+        SELECT p.data AS data
+        FROM message m
+        INNER JOIN part p
+          ON p.session_id = m.session_id
+         AND p.message_id = m.id
+        WHERE m.session_id = ?
+          AND json_extract(m.data, '$.role') = 'user'
+          AND json_extract(p.data, '$.type') = 'text'
+        ORDER BY COALESCE(m.time_created, 0), COALESCE(p.time_created, 0)
+        LIMIT 1
+      `).get(sessionId) as { data: string | null } | undefined;
+
+      const data = readJsonRecord(row?.data);
+      const text = readOptionalString(data?.text);
+      // OpenCode persists the first prompt as a JSON string literal (e.g.
+      // `"hello"`), so decode it to avoid titling the session with quotes.
+      return text === undefined ? undefined : unwrapJsonStringLiteral(text);
+    } catch {
+      return undefined;
+    }
+  }
+}
