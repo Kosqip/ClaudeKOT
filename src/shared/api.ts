@@ -302,6 +302,13 @@ export const api = {
     cancel: (id: string) => del(`/api/scheduled-messages/${encodeURIComponent(id)}`),
   },
 
+  // Fans one message out to several already-created provider sessions at
+  // once. Used by the mix module's send panel; the mix module.
+  mix: {
+    dispatch: (body: { targets: Array<{ sessionId: string }>; content: string; options?: unknown }) =>
+      post('/api/mix/dispatch', body),
+  },
+
   // Workspace file tree
   readFile: (projectId: string, filePath: string) =>
     get(`/api/file-tree/projects/${projectId}/file${query({ filePath })}`),

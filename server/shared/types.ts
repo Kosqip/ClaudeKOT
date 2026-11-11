@@ -1799,3 +1799,32 @@ export type CliApplication = {
 export type SandboxCommandService = {
   execute(argumentsList: string[]): Promise<number>;
 };
+
+// ---------------------------
+//----------------- MIX DISPATCH TYPES ------------
+/**
+ * One target of a mix dispatch: an existing app session the same user message
+ * is fanned out to. Each session already pins its own provider (and, for
+ * providers that need one, its own provider-native session id) from the
+ * sessions table, so the mix layer never resolves or stores a provider itself
+ * — it only names which already-provider-bound sessions receive the turn.
+ */
+export type MixTarget = {
+  sessionId: string;
+};
+
+/**
+ * One target session's outcome from a mix dispatch.
+ *
+ * `started` mirrors `runDetachedChatTurn`'s own result: true once the
+ * provider run was handed off, regardless of how it later finishes (that
+ * outcome streams through the session's normal chat.subscribe channel, not
+ * through this response). `error` is set only when the turn never started at
+ * all (missing session, unknown provider, a run already in progress).
+ */
+export type MixDispatchResult = {
+  sessionId: string;
+  provider: LLMProvider;
+  started: boolean;
+  error: string | null;
+};
