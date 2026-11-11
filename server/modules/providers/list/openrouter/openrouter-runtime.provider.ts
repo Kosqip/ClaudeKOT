@@ -1,50 +1,31 @@
 import { randomUUID } from 'node:crypto';
 
-import { readOpenRouterApiKey } from '@/modules/providers/list/openrouter/openrouter-auth.provider.js';
 import { appendOpenRouterHistoryRow, readOpenRouterHistory } from '@/modules/providers/list/openrouter/openrouter-history.store.js';
+import {
+  buildChatTurns,
+  getServiceAdapter,
+  parseModelReference,
+  splitSseLines,
+} from '@/modules/providers/list/openrouter/openrouter-service-registry.js';
 import type { IProviderRuntime } from '@/shared/interfaces.js';
-import type { AnyRecord, NormalizedMessage, ProviderRuntimeContext, ProviderRuntimeWriter } from '@/shared/types.js';
+import type { AnyRecord, ProviderRuntimeContext, ProviderRuntimeWriter } from '@/shared/types.js';
 import { createCompleteMessage, createNormalizedMessage } from '@/shared/utils.js';
 
-const OPENROUTER_CHAT_COMPLETIONS_URL = 'https://openrouter.ai/api/v1/chat/completions';
 const PROVIDER = 'openrouter';
 
-type OpenRouterChatMessage = {
-  role: 'user' | 'assistant';
-  content: string;
-};
-
 /** Live HTTP requests keyed by app session id, so `abort()` can cancel them. */
-const activeOpenRouterRequests = new Map<string, AbortController>();
-
-/** Rebuilds the OpenAI-compatible message list OpenRouter expects from recorded turns. */
-function buildChatMessages(history: NormalizedMessage[], nextUserText: string): OpenRouterChatMessage[] {
-  const turns: OpenRouterChatMessage[] = history
-    .filter((message) => message.kind === 'text' && (message.role === 'user' || message.role === 'assistant'))
-    .map((message) => ({ role: message.role as 'user' | 'assistant', content: message.content ?? '' }));
-
-  turns.push({ role: 'user', content: nextUserText });
-  return turns;
-}
+const activeApiRequests = new Map<string, AbortController>();
 
 /**
- * Parses one buffered chunk of an OpenAI-compatible SSE stream into complete
- * `data:` lines, returning the leftover partial line to prepend to the next chunk.
- */
-function splitSseLines(buffer: string): { lines: string[]; remainder: string } {
-  const parts = buffer.split('\n');
-  const remainder = parts.pop() ?? '';
-  return { lines: parts, remainder };
-}
-
-/**
- * Runs one OpenRouter chat-completions turn over HTTP with SSE streaming.
+ * Runs one turn over HTTP with SSE streaming against whichever API service
+ * the session's model string selects (OpenRouter by default, or `anthropic:`
+ * / `openai:` for a direct API key — see `parseModelReference`).
  *
- * Unlike every other provider, OpenRouter has no local CLI process: requests
- * go straight to `https://openrouter.ai/api/v1/chat/completions` with the key
- * from `OPENROUTER_API_KEY`, and the resulting text deltas are translated
- * into the same `NormalizedMessage` stream (`stream_delta` then `complete`)
- * the rest of the app already renders uniformly for every provider.
+ * Unlike every other provider, this one has no local CLI process: requests
+ * go straight to the selected service's endpoint, and the resulting text
+ * deltas are translated into the same `NormalizedMessage` stream
+ * (`stream_delta` then `complete`) the rest of the app already renders
+ * uniformly for every provider, regardless of which service answered.
  */
 async function runOpenRouter(
   command: string,
@@ -55,6 +36,8 @@ async function runOpenRouter(
   const isNewSession = !options.sessionId;
   const sessionId: string = options.sessionId || randomUUID();
   const model = await context.resolveResumeModel(options.sessionId, options.model);
+  const { service, modelId } = parseModelReference(model ?? '');
+  const adapter = getServiceAdapter(service);
 
   if (isNewSession) {
     writer.setSessionId?.(sessionId);
@@ -67,11 +50,11 @@ async function runOpenRouter(
     }));
   }
 
-  const apiKey = readOpenRouterApiKey();
+  const apiKey = adapter.readApiKey();
   if (!apiKey) {
     const errorMessage = createNormalizedMessage({
       kind: 'error',
-      content: 'OPENROUTER_API_KEY is not set on the server.',
+      content: `${adapter.envVarName} is not set on the server.`,
       sessionId,
       provider: PROVIDER,
     });
@@ -91,29 +74,23 @@ async function runOpenRouter(
   await appendOpenRouterHistoryRow(userTurn);
 
   const abortController = new AbortController();
-  activeOpenRouterRequests.set(sessionId, abortController);
+  activeApiRequests.set(sessionId, abortController);
 
   let assembledText = '';
   let aborted = false;
 
   try {
-    const response = await fetch(OPENROUTER_CHAT_COMPLETIONS_URL, {
+    const request = adapter.buildRequest(modelId, buildChatTurns(priorHistory, command));
+    const response = await fetch(request.url, {
       method: 'POST',
       signal: abortController.signal,
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model,
-        stream: true,
-        messages: buildChatMessages(priorHistory, command),
-      }),
+      headers: request.headers,
+      body: JSON.stringify(request.body),
     });
 
     if (!response.ok || !response.body) {
       const bodyText = await response.text().catch(() => '');
-      throw new Error(`OpenRouter request failed (${response.status}): ${bodyText || response.statusText}`);
+      throw new Error(`${service} request failed (${response.status}): ${bodyText || response.statusText}`);
     }
 
     const reader = response.body.getReader();
@@ -137,19 +114,8 @@ async function runOpenRouter(
         }
 
         const payload = line.slice('data:'.length).trim();
-        if (payload === '[DONE]') {
-          continue;
-        }
-
-        let parsedChunk: AnyRecord;
-        try {
-          parsedChunk = JSON.parse(payload);
-        } catch {
-          continue;
-        }
-
-        const deltaText = parsedChunk?.choices?.[0]?.delta?.content;
-        if (typeof deltaText === 'string' && deltaText) {
+        const deltaText = adapter.readStreamDelta(payload);
+        if (deltaText) {
           assembledText += deltaText;
           writer.send(createNormalizedMessage({
             kind: 'stream_delta',
@@ -172,7 +138,7 @@ async function runOpenRouter(
       }));
     }
   } finally {
-    activeOpenRouterRequests.delete(sessionId);
+    activeApiRequests.delete(sessionId);
   }
 
   if (assembledText) {
@@ -194,15 +160,15 @@ async function runOpenRouter(
   }));
 }
 
-/** Cancels the in-flight OpenRouter HTTP request for a session, if any. */
+/** Cancels the in-flight HTTP request for a session, if any. */
 function abortOpenRouterSession(sessionId: string): boolean {
-  const abortController = activeOpenRouterRequests.get(sessionId);
+  const abortController = activeApiRequests.get(sessionId);
   if (!abortController) {
     return false;
   }
 
   abortController.abort();
-  activeOpenRouterRequests.delete(sessionId);
+  activeApiRequests.delete(sessionId);
   return true;
 }
 

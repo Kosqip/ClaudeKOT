@@ -311,7 +311,7 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, s
                           : provider === 'opencode'
                               ? t('messageTypes.opencode', { defaultValue: 'OpenCode' })
                               : provider === 'openrouter'
-                                ? t('messageTypes.openrouter', { defaultValue: 'OpenRouter' })
+                                ? t('messageTypes.openrouter', { defaultValue: 'Custom API' })
                               : t('messageTypes.claude'))}
               </div>
             </div>

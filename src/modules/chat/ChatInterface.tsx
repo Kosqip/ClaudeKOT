@@ -447,7 +447,7 @@ function ChatInterface({
         : provider === 'opencode'
             ? t('messageTypes.opencode', { defaultValue: 'OpenCode' })
           : provider === 'openrouter'
-            ? t('messageTypes.openrouter', { defaultValue: 'OpenRouter' })
+            ? t('messageTypes.openrouter', { defaultValue: 'Custom API' })
           : t('messageTypes.claude');
 
   if (!selectedProject) {

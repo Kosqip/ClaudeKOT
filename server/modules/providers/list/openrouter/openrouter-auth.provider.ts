@@ -1,21 +1,27 @@
+import { listServiceEnvVarNames } from '@/modules/providers/list/openrouter/openrouter-service-registry.js';
 import type { IProviderAuth } from '@/shared/interfaces.js';
 import type { CliVersionProbe, ProviderAuthStatus } from '@/shared/types.js';
 
-/** Name of the environment variable that carries the OpenRouter API key. */
-export const OPENROUTER_API_KEY_ENV_VAR = 'OPENROUTER_API_KEY';
-
-/** Reads the configured OpenRouter API key, or null when none is set. */
-export function readOpenRouterApiKey(): string | null {
-  const value = process.env[OPENROUTER_API_KEY_ENV_VAR];
-  return value && value.trim() ? value.trim() : null;
-}
+const SERVICE_DISPLAY_NAME: Record<string, string> = {
+  openrouter: 'OpenRouter',
+  anthropic: 'Anthropic (direct)',
+  openai: 'OpenAI (direct)',
+};
 
 /**
- * Auth adapter for OpenRouter.
+ * Auth adapter for the `openrouter` provider's now-generalized HTTP backend.
  *
- * OpenRouter is a plain HTTP API, not a local CLI: there is nothing to
- * install and no login flow, so "installed" is always true and
- * "authenticated" reflects only whether `OPENROUTER_API_KEY` is configured.
+ * It is a plain HTTP API, not a local CLI: there is nothing to install and
+ * no login flow, so "installed" is always true. "authenticated" is true as
+ * soon as any one of the three services' API keys
+ * (`OPENROUTER_API_KEY`/`ANTHROPIC_DIRECT_API_KEY`/`OPENAI_DIRECT_API_KEY`)
+ * is configured — a session only needs the one key for whichever service its
+ * model string selects, not all three. `getStatus()` reports which services
+ * are actually configured through `email` (reusing the field the UI already
+ * renders as "Logged in as ...") so a user with, say, only an Anthropic key
+ * can tell at a glance that OpenAI-service models will not work yet, without
+ * the `error` field (rendered as a hard failure) firing while at least one
+ * service does work.
  */
 export class OpenRouterProviderAuth implements IProviderAuth {
   checkInstalled(): CliVersionProbe {
@@ -23,16 +29,32 @@ export class OpenRouterProviderAuth implements IProviderAuth {
   }
 
   async getStatus(): Promise<ProviderAuthStatus> {
-    const apiKey = readOpenRouterApiKey();
+    const services = listServiceEnvVarNames().map(({ service, envVarName }) => ({
+      service,
+      envVarName,
+      configured: Boolean(process.env[envVarName]?.trim()),
+    }));
+    const configuredServices = services.filter((entry) => entry.configured);
+
+    if (configuredServices.length === 0) {
+      return {
+        installed: true,
+        provider: 'openrouter',
+        installedVersion: null,
+        authenticated: false,
+        email: null,
+        method: null,
+        error: `None of ${services.map((entry) => entry.envVarName).join(', ')} are set.`,
+      };
+    }
 
     return {
       installed: true,
       provider: 'openrouter',
       installedVersion: null,
-      authenticated: Boolean(apiKey),
-      email: null,
-      method: apiKey ? 'api_key' : null,
-      error: apiKey ? undefined : `${OPENROUTER_API_KEY_ENV_VAR} is not set.`,
+      authenticated: true,
+      email: configuredServices.map((entry) => SERVICE_DISPLAY_NAME[entry.service]).join(', '),
+      method: 'api_key',
     };
   }
 }

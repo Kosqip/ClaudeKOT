@@ -159,6 +159,24 @@ function handleRunFailureForAutoHandoff(input: { provider: Parameters<typeof det
         });
 }
 
+const KNOWN_LLM_PROVIDERS: LLMProvider[] = ['claude', 'codex', 'cursor', 'opencode', 'openrouter'];
+
+/**
+ * Reads the user's configured `handoffFallbackOrder` preference, validating
+ * that it is really an array of known provider ids before trusting it —
+ * `userPreferencesDb` stores arbitrary JSON, so a stale or hand-edited value
+ * is treated as "not set" (returns `undefined`) rather than passed through,
+ * letting `handoffSessionOnLimit` fall back to its own default order.
+ */
+function readStoredFallbackOrder(userId: number): LLMProvider[] | undefined {
+    const stored = userPreferencesDb.getPreferences(userId).handoffFallbackOrder;
+    if (!Array.isArray(stored) || stored.length === 0) {
+        return undefined;
+    }
+    const isValid = stored.every((entry) => KNOWN_LLM_PROVIDERS.includes(entry));
+    return isValid ? stored as LLMProvider[] : undefined;
+}
+
 /**
  * Claude's SDK pushes a `rate_limit_status` message whenever claude.ai's
  * utilization changes, including `status: 'allowed_warning'` well before any
@@ -193,7 +211,7 @@ function handleRateLimitStatusForAutoHandoff(input: { provider: LLMProvider; ses
     }
 
     handoffSessionOnLimit(
-        { fromSessionId: input.sessionId, userId, reason: decision.reason },
+        { fromSessionId: input.sessionId, userId, reason: decision.reason, fallbackOrder: readStoredFallbackOrder(userId) },
         providerRuntimeService,
     )
         .then((result) => {
