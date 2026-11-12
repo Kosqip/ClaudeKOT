@@ -416,7 +416,7 @@
       "versionUnavailable": "Не удалось определить версию",
       "updateAvailable": "Доступно обновление: v{{version}}",
       "upToDate": "Актуальная версия",
-      "bundled": "Поставляется вместе с CloudCLI и обновляется вместе с ним.",
+      "bundled": "Поставляется вместе с ClaudeKOT и обновляется вместе с ним.",
       "platform": "Управляется платформой хостинга.",
       "updateTo": "Обновить до v{{version}}",
       "runUpdater": "Запустить обновление",
@@ -641,5 +641,10 @@
     "errors": {
       "globalAddPartial": "Добавлено, кроме: {{providers}}"
     }
+  },
+  "about": {
+    "tagline": "Один интерфейс для нескольких ИИ-агентов, которые подменяют друг друга",
+    "basedOn": "ClaudeKOT сделан на основе открытого проекта CloudCLI (Claude Code UI) от Siteboon.",
+    "licensed": "Лицензия AGPL-3.0"
   }
 }

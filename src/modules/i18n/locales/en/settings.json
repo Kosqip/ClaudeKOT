@@ -467,7 +467,7 @@
       "versionUnavailable": "Could not read the version",
       "updateAvailable": "Update available: v{{version}}",
       "upToDate": "Up to date",
-      "bundled": "Ships with CloudCLI and is updated together with it.",
+      "bundled": "Ships with ClaudeKOT and is updated together with it.",
       "platform": "Managed by the hosting platform.",
       "updateTo": "Update to v{{version}}",
       "runUpdater": "Run updater",
@@ -662,7 +662,7 @@
     },
     "managed": {
       "badge": "Managed",
-      "hint": "Managed by CloudCLI."
+      "hint": "Managed by ClaudeKOT."
     },
     "help": {
       "title": "About Codex MCP",
@@ -956,7 +956,8 @@
     "unknownError": "Unknown error"
   },
   "about": {
-    "tagline": "Open-source AI coding assistant interface",
+    "tagline": "One interface for several AI coding agents that take over from each other",
+    "basedOn": "ClaudeKOT is built on the open-source CloudCLI (Claude Code UI) by Siteboon.",
     "starOnGitHub": "Star on GitHub",
     "docs": "Docs",
     "hostedTitle": "Try CloudCLI Hosted",

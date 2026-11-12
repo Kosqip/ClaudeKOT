@@ -154,7 +154,7 @@ describe('ProviderCliVersion', () => {
       .toBe('This agent is working in a session. Wait for it to finish or stop it, then update.');
   });
 
-  it('offers no update for a CLI that ships with CloudCLI, and hides itself when the CLI is missing', async () => {
+  it('offers no update for a CLI that ships with ClaudeKOT, and hides itself when the CLI is missing', async () => {
     responses.status = [claudeStatus({
       provider: 'codex',
       installedVersion: '0.156.1',
@@ -164,7 +164,7 @@ describe('ProviderCliVersion', () => {
       updateUnavailableReason: 'bundled',
     })];
     const { unmount } = renderRow('0.156.1');
-    expect(await screen.findByText('Ships with CloudCLI and is updated together with it.')).toBeTruthy();
+    expect(await screen.findByText('Ships with ClaudeKOT and is updated together with it.')).toBeTruthy();
     expect(screen.queryByRole('button')).toBeNull();
     unmount();
 

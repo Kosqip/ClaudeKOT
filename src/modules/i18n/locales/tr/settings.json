@@ -468,7 +468,7 @@
       "versionUnavailable": "Sürüm okunamadı",
       "updateAvailable": "Güncelleme var: v{{version}}",
       "upToDate": "Güncel",
-      "bundled": "CloudCLI ile birlikte gelir ve onunla birlikte güncellenir.",
+      "bundled": "ClaudeKOT ile birlikte gelir ve onunla birlikte güncellenir.",
       "platform": "Barındırma platformu tarafından yönetilir.",
       "updateTo": "v{{version}} sürümüne güncelle",
       "runUpdater": "Güncelleyiciyi çalıştır",
@@ -641,7 +641,7 @@
     },
     "managed": {
       "badge": "Yönetilen",
-      "hint": "CloudCLI tarafından yönetiliyor."
+      "hint": "ClaudeKOT tarafından yönetiliyor."
     },
     "help": {
       "title": "Codex MCP Hakkında",

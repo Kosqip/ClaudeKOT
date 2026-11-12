@@ -462,7 +462,7 @@
       "versionUnavailable": "Versi tidak dapat dibaca",
       "updateAvailable": "Pembaruan tersedia: v{{version}}",
       "upToDate": "Sudah terbaru",
-      "bundled": "Disertakan bersama CloudCLI dan diperbarui bersamanya.",
+      "bundled": "Disertakan bersama ClaudeKOT dan diperbarui bersamanya.",
       "platform": "Dikelola oleh platform hosting.",
       "updateTo": "Perbarui ke v{{version}}",
       "runUpdater": "Jalankan pembaru",
@@ -622,7 +622,7 @@
     },
     "managed": {
       "badge": "Dikelola",
-      "hint": "Dikelola oleh CloudCLI."
+      "hint": "Dikelola oleh ClaudeKOT."
     },
     "help": {
       "title": "Tentang MCP Codex",

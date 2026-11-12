@@ -463,7 +463,7 @@
       "versionUnavailable": "לא ניתן לקרוא את הגרסה",
       "updateAvailable": "עדכון זמין: v{{version}}",
       "upToDate": "מעודכנת",
-      "bundled": "מגיעה עם CloudCLI ומתעדכנת יחד איתו.",
+      "bundled": "מגיעה עם ClaudeKOT ומתעדכנת יחד איתו.",
       "platform": "מנוהלת על ידי פלטפורמת האירוח.",
       "updateTo": "עדכון ל-v{{version}}",
       "runUpdater": "הפעלת העדכון",
@@ -621,7 +621,7 @@
     },
     "managed": {
       "badge": "מנוהל",
-      "hint": "מנוהל על ידי CloudCLI."
+      "hint": "מנוהל על ידי ClaudeKOT."
     },
     "help": {
       "title": "על Codex MCP",

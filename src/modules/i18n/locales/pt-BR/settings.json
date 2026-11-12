@@ -462,7 +462,7 @@
       "versionUnavailable": "Não foi possível ler a versão",
       "updateAvailable": "Atualização disponível: v{{version}}",
       "upToDate": "Atualizada",
-      "bundled": "Vem com o CloudCLI e é atualizada junto com ele.",
+      "bundled": "Vem com o ClaudeKOT e é atualizada junto com ele.",
       "platform": "Gerenciada pela plataforma de hospedagem.",
       "updateTo": "Atualizar para v{{version}}",
       "runUpdater": "Executar atualizador",
@@ -635,7 +635,7 @@
     },
     "managed": {
       "badge": "Gerenciado",
-      "hint": "Gerenciado pelo CloudCLI."
+      "hint": "Gerenciado pelo ClaudeKOT."
     },
     "help": {
       "title": "Sobre MCP do Codex",

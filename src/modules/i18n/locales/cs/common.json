@@ -103,7 +103,7 @@
     "openInEditor": "Otevřít v editoru"
   },
   "mainContent": {
-    "loading": "Načítání CloudCLI",
+    "loading": "Načítání ClaudeKOT",
     "settingUpWorkspace": "Připravuje se váš pracovní prostor...",
     "chooseProject": "Vyberte projekt",
     "selectProjectDescription": "Vyberte projekt v postranním panelu a začněte programovat s asistentem Claude. Každý projekt obsahuje vaše relace chatu a historii souborů.",

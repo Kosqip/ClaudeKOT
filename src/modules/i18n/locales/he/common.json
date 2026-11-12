@@ -98,7 +98,7 @@
     "openInEditor": "פתיחה בעורך"
   },
   "mainContent": {
-    "loading": "טוען את CloudCLI",
+    "loading": "טוען את ClaudeKOT",
     "settingUpWorkspace": "מכין את סביבת העבודה…",
     "chooseProject": "בחירת פרויקט",
     "selectProjectDescription": "יש לבחור פרויקט בסרגל הצד כדי להתחיל לכתוב קוד עם Claude. כל פרויקט מכיל את סשני הצ'אט ואת היסטוריית הקבצים שלו.",

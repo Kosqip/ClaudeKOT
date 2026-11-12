@@ -416,7 +416,7 @@
       "versionUnavailable": "Impossibile leggere la versione",
       "updateAvailable": "Aggiornamento disponibile: v{{version}}",
       "upToDate": "Aggiornata",
-      "bundled": "Inclusa in CloudCLI e aggiornata insieme a esso.",
+      "bundled": "Inclusa in ClaudeKOT e aggiornata insieme a esso.",
       "platform": "Gestita dalla piattaforma di hosting.",
       "updateTo": "Aggiorna a v{{version}}",
       "runUpdater": "Esegui aggiornamento",

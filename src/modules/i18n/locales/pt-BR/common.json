@@ -88,7 +88,7 @@
     "openInEditor": "Abrir no editor"
   },
   "mainContent": {
-    "loading": "Carregando CloudCLI",
+    "loading": "Carregando ClaudeKOT",
     "settingUpWorkspace": "Configurando seu espaço de trabalho...",
     "chooseProject": "Escolha seu projeto",
     "selectProjectDescription": "Selecione um projeto na barra lateral para começar a codar com o Claude. Cada projeto contém suas sessões de chat e histórico de arquivos.",

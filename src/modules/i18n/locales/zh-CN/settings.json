@@ -445,7 +445,7 @@
       "versionUnavailable": "无法读取版本",
       "updateAvailable": "有可用更新：v{{version}}",
       "upToDate": "已是最新",
-      "bundled": "随 CloudCLI 一起提供，并随其一起更新。",
+      "bundled": "随 ClaudeKOT 一起提供，并随其一起更新。",
       "platform": "由托管平台管理。",
       "updateTo": "更新到 v{{version}}",
       "runUpdater": "运行更新程序",
@@ -605,7 +605,7 @@
     },
     "managed": {
       "badge": "已托管",
-      "hint": "由 CloudCLI 管理。"
+      "hint": "由 ClaudeKOT 管理。"
     },
     "help": {
       "title": "关于 Codex MCP",

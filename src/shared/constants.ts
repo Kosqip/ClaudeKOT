@@ -26,6 +26,17 @@ type GitStatusFileGroup = 'modified' | 'added' | 'deleted' | 'untracked';
 export const CLOUDCLI_WORDMARK_FONT_FAMILY =
   'ui-sans-serif, system-ui, sans-serif, Apple Color Emoji, Segoe UI Emoji, Segoe UI Symbol, Noto Color Emoji';
 
+/** The product name shown in the UI. This app is ClaudeKOT; CloudCLI is the upstream project it is built on. */
+export const APP_NAME = 'ClaudeKOT';
+
+/** This project's own repository: where "report an issue" and the version check point. */
+export const APP_REPO_OWNER = 'Kosqip';
+export const APP_REPO_NAME = 'ClaudeKOT';
+export const APP_REPO_URL = `https://github.com/${APP_REPO_OWNER}/${APP_REPO_NAME}`;
+
+/** The upstream project this app is derived from; shown in the about tab as attribution (required by AGPL). */
+export const UPSTREAM_REPO_URL = 'https://github.com/siteboon/claudecodeui';
+
 // ---------------------------
 
 //----------------- APPLICATION VERSION ------------

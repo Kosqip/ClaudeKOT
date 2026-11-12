@@ -88,7 +88,7 @@
     "openInEditor": "Buka di Editor"
   },
   "mainContent": {
-    "loading": "Memuat CloudCLI",
+    "loading": "Memuat ClaudeKOT",
     "settingUpWorkspace": "Menyiapkan workspace...",
     "chooseProject": "Pilih Proyek",
     "selectProjectDescription": "Pilih proyek dari sidebar untuk mulai coding dengan Claude. Setiap proyek berisi sesi chat dan riwayat file.",

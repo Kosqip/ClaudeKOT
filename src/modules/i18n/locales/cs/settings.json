@@ -435,7 +435,7 @@
       "versionUnavailable": "Verzi se nepodařilo zjistit",
       "updateAvailable": "K dispozici je aktualizace: v{{version}}",
       "upToDate": "Aktuální",
-      "bundled": "Dodává se s CloudCLI a aktualizuje se spolu s ním.",
+      "bundled": "Dodává se s ClaudeKOT a aktualizuje se spolu s ním.",
       "platform": "Spravováno hostingovou platformou.",
       "updateTo": "Aktualizovat na v{{version}}",
       "runUpdater": "Spustit aktualizaci",
@@ -601,7 +601,7 @@
     },
     "managed": {
       "badge": "Spravováno",
-      "hint": "Spravuje CloudCLI."
+      "hint": "Spravuje ClaudeKOT."
     },
     "help": {
       "title": "O MCP pro Codex",
