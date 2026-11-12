@@ -32,6 +32,7 @@ import ChatComposer from '@/modules/chat/composer/ChatComposer';
 import CommandResultModal from '@/modules/chat/modals/CommandResultModal';
 import { MixSendPanel } from '@/modules/mix';
 import { OrchestratorPlanPanel } from '@/modules/orchestrator';
+import { TaskRouterPanel } from '@/modules/task-router';
 import { readUserPreference } from '@/shared/userSettings';
 
 type ChatInterfaceProps = {
@@ -631,6 +632,15 @@ function ChatInterface({
         {selectedProject?.sessions && selectedProject.sessions.length >= 2 ? (
           <div className="px-4 pb-3">
             <MixSendPanel candidates={selectedProject.sessions} />
+          </div>
+        ) : null}
+
+        {selectedProject ? (
+          <div className="px-4 pb-3">
+            <TaskRouterPanel
+              projectPath={selectedProject.fullPath || selectedProject.path || ''}
+              onOpenSession={(sessionId) => onNavigateToSession?.(sessionId)}
+            />
           </div>
         ) : null}
 

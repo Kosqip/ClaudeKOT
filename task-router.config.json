@@ -1,0 +1,46 @@
+{
+  "_comment": "Edited by hand. Restart the server after changing this file — it is read fresh on every classification request, so no rebuild is needed, only a process restart to be safe against any future caching. Each tag lists keywords/phrases (case-insensitive substring match) that auto-select it when the user does not pick a tag explicitly. Order matters: the first tag with a matching keyword wins.",
+  "routine": [
+    "рутина",
+    "routine",
+    "почини опечатку",
+    "typo",
+    "переименуй",
+    "rename",
+    "простой",
+    "мелкая правка",
+    "small fix"
+  ],
+  "coding": [
+    "код",
+    "code",
+    "реализуй",
+    "implement",
+    "напиши функцию",
+    "write a function",
+    "баг",
+    "bug",
+    "рефактор",
+    "refactor"
+  ],
+  "second_opinion": [
+    "второе мнение",
+    "second opinion",
+    "сравни",
+    "compare",
+    "какой вариант лучше",
+    "which is better",
+    "проверь решение",
+    "review this solution"
+  ],
+  "complex": [
+    "сложное решение",
+    "complex decision",
+    "архитектур",
+    "architecture",
+    "стратеги",
+    "strategy",
+    "критическое решение",
+    "critical decision"
+  ]
+}
