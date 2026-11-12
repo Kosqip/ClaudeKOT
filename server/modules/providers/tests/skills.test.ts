@@ -706,3 +706,38 @@ test('providerSkillsService rejects managed skill creation for opencode', { conc
     /does not support managed global skills/i,
   );
 });
+
+/**
+ * Covers the "add to every provider" action (mirrors the MCP module's
+ * `addMcpServerToAllProviders`): it must write the same skill to every
+ * provider that supports one, and report a per-provider error — not throw
+ * and abandon the ones that succeeded — for OpenCode and OpenRouter, which
+ * have no managed global skill folder.
+ */
+test('providerSkillsService.addSkillToAllProviders writes the skill to every provider that supports one and reports the rest', { concurrency: false }, async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'llm-skills-global-'));
+  const restoreHomeDir = patchHomeDir(tempRoot);
+
+  try {
+    const results = await providerSkillsService.addSkillToAllProviders({
+      entries: [
+        {
+          directoryName: 'global-skill-dir',
+          content: '---\nname: global-skill\ndescription: Shared across providers\n---\n\nBody.\n',
+        },
+      ],
+    });
+
+    const byProvider = new Map(results.map((result) => [result.provider, result]));
+    for (const provider of ['claude', 'codex', 'cursor'] as const) {
+      assert.equal(byProvider.get(provider)?.error, undefined, `${provider} should succeed`);
+      assert.ok(byProvider.get(provider)?.skills?.[0], `${provider} should return the created skill`);
+    }
+    for (const provider of ['opencode', 'openrouter'] as const) {
+      assert.ok(byProvider.get(provider)?.error, `${provider} should report its own error`);
+    }
+  } finally {
+    restoreHomeDir();
+    await fs.rm(tempRoot, { recursive: true, force: true });
+  }
+});

@@ -489,6 +489,7 @@ export const api = {
       get(`/api/providers/${encodeURIComponent(provider)}/skills${query({ workspacePath })}`),
     saveSkills: (provider: string, payload: unknown) =>
       post(`/api/providers/${provider}/skills`, payload),
+    saveGlobalSkill: (payload: unknown) => post('/api/providers/skills/global', payload),
   },
 
   // Slash commands

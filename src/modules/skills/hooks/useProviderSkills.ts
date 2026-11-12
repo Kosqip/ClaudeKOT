@@ -332,6 +332,30 @@ export function useProviderSkills({ selectedProvider, currentProjects }: UseProv
     }
   }, [refreshSkills, selectedProvider]);
 
+  /**
+   * Writes the same skill entries to every registered provider's own skill
+   * folder in one call (`POST /api/providers/skills/global`), mirroring the
+   * MCP module's "add to all providers" action. A provider whose adapter
+   * rejects the write (e.g. OpenRouter, which has none) reports its own
+   * error in the per-provider result array without failing the others —
+   * callers surface that array to the user rather than treating any one
+   * failure as the whole action's outcome.
+   */
+  const addSkillToAllProviders = useCallback(async (
+    payload: ProviderSkillCreatePayload,
+  ): Promise<Array<{ provider: SkillsProvider; error?: string }>> => {
+    const response = await api.providers.saveGlobalSkill(payload);
+    const data = await toResponseJson<ApiResponse<{ results: Array<{ provider: SkillsProvider; error?: string }> }>>(response);
+    if (!response.ok || !data.success) {
+      throw new Error(getApiErrorMessage(data, 'Failed to add the skill to every provider'));
+    }
+
+    clearProviderSkillCache(selectedProvider);
+    await refreshSkills({ force: true });
+    setSaveStatus(data.data.results.every((result) => !result.error) ? 'success' : 'error');
+    return data.data.results;
+  }, [refreshSkills, selectedProvider]);
+
   useEffect(() => {
     void refreshSkills();
 
@@ -360,6 +384,7 @@ export function useProviderSkills({ selectedProvider, currentProjects }: UseProv
     loadError,
     saveStatus,
     addSkills,
+    addSkillToAllProviders,
     refreshSkills,
   };
 }

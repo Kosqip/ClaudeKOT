@@ -194,9 +194,11 @@ export default function ProviderSkills({ selectedProvider, currentProjects }: Pr
     loadError,
     saveStatus,
     addSkills,
+    addSkillToAllProviders,
     refreshSkills,
   } = useProviderSkills({ selectedProvider, currentProjects });
   const [queuedFiles, setQueuedFiles] = useState<QueuedSkillFile[]>([]);
+  const [addToAllProviders, setAddToAllProviders] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [justInstalled, setJustInstalled] = useState(false);
@@ -349,7 +351,23 @@ export default function ProviderSkills({ selectedProvider, currentProjects }: Pr
           )
           : undefined,
       })));
-      await addSkills({ entries });
+      if (addToAllProviders) {
+        const results = await addSkillToAllProviders({ entries });
+        const failed = results.filter((result) => result.error);
+        if (failed.length > 0) {
+          // Partial failure (e.g. OpenRouter, which has no skill folder) is
+          // expected and not a reason to treat the whole action as failed —
+          // surface it as a warning instead of blocking the dialog from closing.
+          setSubmitError(
+            t('skillsPage.errors.globalAddPartial', {
+              defaultValue: 'Added for most providers, but not: {{providers}}',
+              providers: failed.map((result) => PROVIDER_NAMES[result.provider]).join(', '),
+            }),
+          );
+        }
+      } else {
+        await addSkills({ entries });
+      }
       setQueuedFiles([]);
       setJustInstalled(true);
       setIsAddDialogOpen(false);
@@ -358,7 +376,7 @@ export default function ProviderSkills({ selectedProvider, currentProjects }: Pr
     } finally {
       setIsSubmitting(false);
     }
-  }, [addSkills, queuedFiles, t]);
+  }, [addSkillToAllProviders, addSkills, addToAllProviders, queuedFiles, t]);
 
   const handleAddDialogOpenChange = useCallback((open: boolean) => {
     if (open) {
@@ -373,6 +391,7 @@ export default function ProviderSkills({ selectedProvider, currentProjects }: Pr
     setSubmitError(null);
     setShowInstallPath(false);
     setJustInstalled(false);
+    setAddToAllProviders(false);
     setIsAddDialogOpen(false);
   }, []);
 
@@ -599,6 +618,21 @@ export default function ProviderSkills({ selectedProvider, currentProjects }: Pr
 
           <div className="min-h-0 flex-1 overflow-y-auto p-4">
             {uploadPanel}
+          </div>
+
+          <div className="flex flex-shrink-0 items-center gap-2 border-t border-border/60 px-4 py-2">
+            <input
+              id="skill-add-to-all-providers"
+              type="checkbox"
+              checked={addToAllProviders}
+              onChange={(event) => setAddToAllProviders(event.target.checked)}
+              disabled={isSubmitting}
+            />
+            <label htmlFor="skill-add-to-all-providers" className="text-sm text-muted-foreground">
+              {t('skillsPage.addToAllProviders', {
+                defaultValue: 'Also add this skill for every other provider (Claude, Codex, Cursor, Custom API)',
+              })}
+            </label>
           </div>
 
           <div className="flex flex-shrink-0 flex-col gap-3 border-t border-border/60 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">

@@ -798,6 +798,15 @@ router.delete(
   }),
 );
 
+router.post(
+  '/skills/global',
+  asyncHandler(async (req: Request, res: Response) => {
+    const input = parseProviderSkillCreatePayload(req.body);
+    const results = await providerSkillsService.addSkillToAllProviders(input);
+    res.status(201).json(createApiSuccessResponse({ results }));
+  }),
+);
+
 // ----------------- MCP routes -----------------
 router.get(
   '/:provider/mcp/servers',
