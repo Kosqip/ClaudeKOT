@@ -49,6 +49,14 @@ export type UserPreferences = {
    */
   handoffFallbackOrder: LLMProvider[];
   /**
+   * How OpenRouter should choose among the hosting providers that sell the
+   * same model: `default` leaves it to OpenRouter's own balance, `price`
+   * tries the cheapest first, `throughput` the fastest output, `latency` the
+   * quickest to start answering. Read server-side by the Custom API runtime
+   * (via `userPreferencesDb`) for every OpenRouter request.
+   */
+  openRouterProviderSort: OpenRouterProviderSort;
+  /**
    * A role the user has assigned one provider. Read server-side by
    * `server/modules/orchestrator/orchestrator.routes.ts` (via
    * `userPreferencesDb`, not through this module) to gate and resolve a
@@ -63,6 +71,10 @@ export type UserPreferences = {
 
 /** Mirrors the backend's identically-named constant; kept in sync by hand. */
 export const DEFAULT_HANDOFF_THRESHOLD_PERCENT = 90;
+
+/** The choices for `openRouterProviderSort`, in the order the settings show them. */
+export const OPENROUTER_PROVIDER_SORT_OPTIONS = ['default', 'price', 'throughput', 'latency'] as const;
+export type OpenRouterProviderSort = typeof OPENROUTER_PROVIDER_SORT_OPTIONS[number];
 
 /** Mirrors the backend's identically-named constant; kept in sync by hand. */
 export const DEFAULT_HANDOFF_FALLBACK_ORDER: LLMProvider[] = ['codex', 'claude', 'opencode', 'cursor', 'openrouter'];
@@ -116,6 +128,8 @@ const LEGACY_STORAGE_KEYS: Record<UserPreferenceKey, string> = {
   handoffThresholdPercent: '',
   // New: never had a legacy localStorage key.
   handoffFallbackOrder: '',
+  // New: never had a legacy localStorage key.
+  openRouterProviderSort: '',
   providerRoles: '',
 };
 

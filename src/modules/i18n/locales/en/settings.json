@@ -518,6 +518,16 @@
       "onlyFullLimit": "Never offer, only move on refusal",
       "atPercent": "At {{percent}}%"
     },
+    "openRouterRouting": {
+      "title": "OpenRouter provider choice",
+      "description": "One model is usually sold by several hosting providers at different prices and speeds. Choose which one OpenRouter tries first; if it fails, the next one is used.",
+      "options": {
+        "default": "OpenRouter decides (balanced)",
+        "price": "Cheapest first",
+        "throughput": "Fastest output first",
+        "latency": "Quickest to respond first"
+      }
+    },
     "handoffFallbackOrder": {
       "title": "Fallback backend order",
       "description": "The order backends are tried in when a session is moved automatically. A backend that is not installed, not signed in, or at its own limit is skipped.",

@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  buildOpenRouterProviderRouting,
+  listFreeModelFallbacks,
   mergeLiveOpenRouterCatalog,
   OPENROUTER_PREDEFINED_MODELS,
   OpenRouterProviderModels,
@@ -48,4 +50,20 @@ test('the live list is fetched once per hour, only with a key, and a failure fal
 
   const failing = new OpenRouterProviderModels((async () => { throw new Error('offline'); }) as unknown as typeof fetch, () => true);
   assert.equal(await failing.getSupportedModels(), OPENROUTER_PREDEFINED_MODELS);
+});
+
+test('the routing choice becomes OpenRouter\'s provider sort, and anything else leaves its default routing alone', () => {
+  assert.deepEqual(buildOpenRouterProviderRouting('price'), { sort: 'price' });
+  assert.deepEqual(buildOpenRouterProviderRouting('throughput'), { sort: 'throughput' });
+  assert.deepEqual(buildOpenRouterProviderRouting('latency'), { sort: 'latency' });
+  assert.equal(buildOpenRouterProviderRouting('default'), undefined);
+  assert.equal(buildOpenRouterProviderRouting(undefined), undefined);
+  assert.equal(buildOpenRouterProviderRouting({ sort: 'price' }), undefined);
+});
+
+test('only a free model gets free stand-ins', () => {
+  const free = listFreeModelFallbacks(OPENROUTER_PREDEFINED_MODELS.DEFAULT, OPENROUTER_PREDEFINED_MODELS);
+  assert.equal(free[0], OPENROUTER_PREDEFINED_MODELS.DEFAULT);
+  assert.ok(free.length > 1 && free.every((model) => model.endsWith(':free')));
+  assert.deepEqual(listFreeModelFallbacks('google/gemini-3.8-flash', OPENROUTER_PREDEFINED_MODELS), ['google/gemini-3.8-flash']);
 });

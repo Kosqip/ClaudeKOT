@@ -188,6 +188,23 @@ export function listFreeModelFallbacks(modelId: string, catalog: ProviderModelsD
   return [modelId, ...others].slice(0, MAX_FREE_MODELS_PER_REQUEST);
 }
 
+const PROVIDER_SORTS = ['price', 'throughput', 'latency'] as const;
+
+/**
+ * OpenRouter's `provider` request field for the user's routing choice
+ * (`openRouterProviderSort` preference). One model is usually sold by
+ * several hosting providers at different prices and speeds; left alone,
+ * OpenRouter spreads requests across them by its own balance of price,
+ * speed and reliability. `price`, `throughput` and `latency` make it try
+ * providers strictly in that order instead — cheapest first, fastest output
+ * first, or quickest to start answering first — still moving on to the next
+ * provider when one fails. Anything else returns `undefined`: OpenRouter's
+ * default routing, no field sent.
+ */
+export function buildOpenRouterProviderRouting(sort: unknown): { sort: string } | undefined {
+  return (PROVIDER_SORTS as readonly unknown[]).includes(sort) ? { sort: sort as string } : undefined;
+}
+
 /**
  * The one catalog instance shared by the provider's model adapter and its
  * runtime, so a turn started without a model (a session opened by the task

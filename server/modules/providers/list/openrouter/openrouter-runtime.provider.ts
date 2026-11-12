@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
-import { listFreeModelFallbacks, openRouterProviderModels } from '@/modules/providers/list/openrouter/openrouter-models.provider.js';
+import { userPreferencesDb } from '@/modules/database/index.js';
+import { buildOpenRouterProviderRouting, listFreeModelFallbacks, openRouterProviderModels } from '@/modules/providers/list/openrouter/openrouter-models.provider.js';
 import { appendOpenRouterHistoryRow, readOpenRouterHistory } from '@/modules/providers/list/openrouter/openrouter-history.store.js';
 import {
   buildChatTurns,
@@ -28,6 +29,19 @@ const activeApiRequests = new Map<string, AbortController>();
  * (`stream_delta` then `complete`) the rest of the app already renders
  * uniformly for every provider, regardless of which service answered.
  */
+/** The turn's user's `openRouterProviderSort` setting; undefined for a turn with no user or when it cannot be read. */
+function readProviderSortPreference(userId: unknown): unknown {
+  const id = Number(userId);
+  if (userId === null || userId === undefined || !Number.isInteger(id)) {
+    return undefined;
+  }
+  try {
+    return userPreferencesDb.getPreferences(id).openRouterProviderSort;
+  } catch {
+    return undefined;
+  }
+}
+
 async function runOpenRouter(
   command: string,
   options: AnyRecord,
@@ -100,10 +114,14 @@ async function runOpenRouter(
     if (service === 'openrouter') {
       // A free model that is refused upstream is replaced by the next free one by OpenRouter itself.
       const models = listFreeModelFallbacks(modelId, await openRouterProviderModels.getSupportedModels());
+      const body = request.body as AnyRecord;
       if (models.length > 1) {
-        const body = request.body as AnyRecord;
         delete body.model;
         body.models = models;
+      }
+      const routing = buildOpenRouterProviderRouting(readProviderSortPreference(options.userId));
+      if (routing) {
+        body.provider = routing;
       }
     }
     const response = await fetch(request.url, {
