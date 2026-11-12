@@ -511,7 +511,29 @@
       "button": "Login",
       "reLoginButton": "Re-login"
     },
-    "error": "Error: {{error}}"
+    "error": "Error: {{error}}",
+    "handoffThreshold": {
+      "title": "Automatic backend handoff",
+      "description": "When Claude’s own usage reaches this level, a session on a fallback backend is prepared automatically once the current reply ends. \"Only on full limit\" waits for Claude to refuse a request.",
+      "onlyFullLimit": "Only on full limit",
+      "atPercent": "At {{percent}}%"
+    },
+    "handoffFallbackOrder": {
+      "title": "Fallback backend order",
+      "description": "The order backends are tried in when a session is moved automatically. A backend that is not installed, not signed in, or at its own limit is skipped.",
+      "moveUp": "Move up",
+      "moveDown": "Move down"
+    },
+    "providerRoles": {
+      "title": "Backend roles",
+      "description": "Used by \"Split into subtasks\" in the chat: the orchestrator plans the work, \"hands\" and \"routine\" backends receive the subtasks.",
+      "roles": {
+        "none": "No role",
+        "orchestrator": "Orchestrator",
+        "hands": "Hands",
+        "routine": "Routine"
+      }
+    }
   },
   "permissions": {
     "title": "Permission Settings",
@@ -803,7 +825,8 @@
       "readFailed": "Failed to read skill folder",
       "dropMarkdown": "Drop one or more markdown files or a folder containing SKILL.md.",
       "addFirst": "Add one or more markdown files first.",
-      "importFailed": "Failed to import skills"
+      "importFailed": "Failed to import skills",
+      "globalAddPartial": "Added, except for: {{providers}}"
     },
     "scopes": {
       "user": "User",
@@ -812,7 +835,8 @@
       "project": "Project",
       "admin": "Admin",
       "system": "System"
-    }
+    },
+    "addToAllProviders": "Also add this skill for every other backend that supports skills"
   },
   "browserUse": {
     "title": "Browser",

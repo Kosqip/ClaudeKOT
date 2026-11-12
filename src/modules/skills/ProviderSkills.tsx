@@ -360,7 +360,6 @@ export default function ProviderSkills({ selectedProvider, currentProjects }: Pr
           // surface it as a warning instead of blocking the dialog from closing.
           setSubmitError(
             t('skillsPage.errors.globalAddPartial', {
-              defaultValue: 'Added for most providers, but not: {{providers}}',
               providers: failed.map((result) => PROVIDER_NAMES[result.provider]).join(', '),
             }),
           );
@@ -629,9 +628,7 @@ export default function ProviderSkills({ selectedProvider, currentProjects }: Pr
               disabled={isSubmitting}
             />
             <label htmlFor="skill-add-to-all-providers" className="text-sm text-muted-foreground">
-              {t('skillsPage.addToAllProviders', {
-                defaultValue: 'Also add this skill for every other provider (Claude, Codex, Cursor, Custom API)',
-              })}
+              {t('skillsPage.addToAllProviders')}
             </label>
           </div>
 

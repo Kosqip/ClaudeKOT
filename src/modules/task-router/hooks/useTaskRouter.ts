@@ -16,7 +16,8 @@ export type TaskRouterSessionResult = {
 
 /** The task-router endpoint's full result, as `TaskRouterPanel` renders it. */
 export type TaskRouterDispatchResult = {
-  tag: TaskTag;
+  /** `null` when "Auto-detect" found no matching keyword. */
+  tag: TaskTag | null;
   autoDetected: boolean;
   manualSelectionRequired: boolean;
   sessions: TaskRouterSessionResult[];

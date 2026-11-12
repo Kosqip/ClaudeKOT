@@ -765,6 +765,21 @@ export type RateLimitStatus = {
   resetsAt?: string;
 };
 
+/**
+ * A `handoff_notice` event: the server moved `sessionId`'s conversation to a
+ * new session on another backend because of a usage limit. Mirrors the
+ * server's `LimitHandoffResult`. `mode` is `continue` when the new session
+ * resumed interrupted work, `standby` when it only loaded the context.
+ */
+export type HandoffNotice = {
+  sessionId: string;
+  toSessionId: string;
+  fromProvider: LLMProvider;
+  toProvider: LLMProvider;
+  reason: string;
+  mode: 'continue' | 'standby';
+};
+
 // ---------------------------
 
 //----------------- CHAT COMPOSER ------------

@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import type { Dispatch, MutableRefObject, SetStateAction } from 'react';
 
-import type { ServerEvent,MarkSessionIdle,MarkSessionProcessing,PendingPermissionRequest,ProjectSession,LLMProvider,NormalizedMessage,GetSessionActivity,MarkSessionBackground,SideQuestionEvent,SteerOutcome,RateLimitStatus } from '@/shared/types';
+import type { ServerEvent,MarkSessionIdle,MarkSessionProcessing,PendingPermissionRequest,ProjectSession,LLMProvider,NormalizedMessage,GetSessionActivity,MarkSessionBackground,SideQuestionEvent,SteerOutcome,RateLimitStatus,HandoffNotice } from '@/shared/types';
 import { showCompletionTitleIndicator } from '@/modules/chat/utils/pageTitleNotification';
 import { playChatCompletionSound, playNotificationSound } from '@/shared/utils';
 import type { SessionStore } from '@/modules/chat/hooks/useSessionStore';
@@ -58,6 +58,8 @@ type UseChatRealtimeHandlersArgs = {
    * latest one per session and renders it as a small usage indicator.
    */
   onRateLimitStatus?: (sessionId: string, status: RateLimitStatus) => void;
+  /** The server moved a session to another backend over a usage limit; shown as a banner in that session. */
+  onHandoffNotice?: (notice: HandoffNotice) => void;
 };
 
 /* ------------------------------------------------------------------ */
@@ -95,6 +97,7 @@ export function useChatRealtimeHandlers({
   sessionStore,
   onSteerOutcome,
   onRateLimitStatus,
+  onHandoffNotice,
 }: UseChatRealtimeHandlersArgs) {
   // Session switches can send `chat.subscribe` before this effect has a chance
   // to rebind the websocket listener. Read the visible session id from a ref
@@ -190,6 +193,15 @@ export function useChatRealtimeHandlers({
           // not touch processing state, pending permissions, or the store.
           if (sid && msg.rateLimitStatus) {
             onRateLimitStatus?.(sid, msg.rateLimitStatus as RateLimitStatus);
+          }
+          return;
+        }
+
+        case 'handoff_notice': {
+          // Broadcast outside any run, so it must name its own session
+          // rather than fall back to whichever one is on screen.
+          if (typeof msg.sessionId === 'string' && typeof msg.toSessionId === 'string') {
+            onHandoffNotice?.(msg as unknown as HandoffNotice);
           }
           return;
         }
@@ -510,5 +522,6 @@ export function useChatRealtimeHandlers({
     sessionStore,
     onSteerOutcome,
     onRateLimitStatus,
+    onHandoffNotice,
   ]);
 }

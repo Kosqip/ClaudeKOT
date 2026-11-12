@@ -53,5 +53,24 @@ export function createOpenAiCompatibleChatAdapter(config: { url: string; envVarN
       const deltaText = parsed?.choices?.[0]?.delta?.content;
       return typeof deltaText === 'string' && deltaText ? deltaText : undefined;
     },
+
+    readStreamError(payload: string): string | undefined {
+      if (payload === '[DONE]') {
+        return undefined;
+      }
+
+      let parsed: AnyRecord;
+      try {
+        parsed = JSON.parse(payload);
+      } catch {
+        return undefined;
+      }
+
+      // `{"error":{"code":502,"message":"..."}}`, sent in place of a chunk.
+      if (!parsed?.error) {
+        return undefined;
+      }
+      return String(parsed.error.message ?? parsed.error.code ?? 'The service reported an error.');
+    },
   };
 }

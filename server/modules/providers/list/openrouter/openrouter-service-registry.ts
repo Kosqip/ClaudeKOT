@@ -44,6 +44,13 @@ export type ChatServiceAdapter = {
    * the payload carries no text (a stop sentinel, a non-text event, etc.).
    */
   readStreamDelta(payload: string): string | undefined;
+  /**
+   * The error message when the same kind of payload reports a failure the
+   * service raised after the response had already started streaming (an
+   * overloaded backend, a provider dropping out), or undefined. The HTTP
+   * status was already 200 by then, so this is the only place it shows up.
+   */
+  readStreamError(payload: string): string | undefined;
 };
 
 const adapters: Record<ApiService, ChatServiceAdapter> = {

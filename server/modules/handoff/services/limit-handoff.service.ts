@@ -4,11 +4,82 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { sessionsDb } from '@/modules/database/index.js';
-import { mapClaudeRateLimitType, sessionsService } from '@/modules/providers/index.js';
+import { mapClaudeRateLimitType, providerAuthService, sessionsService } from '@/modules/providers/index.js';
 import type { ProviderRuntimeGateway } from '@/modules/websocket/index.js';
-import { runDetachedChatTurn } from '@/modules/websocket/index.js';
+import { broadcastToConnectedClients, startDetachedChatTurn } from '@/modules/websocket/index.js';
 import { AppError } from '@/shared/utils.js';
-import type { LimitHandoffResult, LLMProvider, ProviderLimitReason, RateLimitStatus } from '@/shared/types.js';
+import type {
+  LimitHandoffMode,
+  LimitHandoffResult,
+  LLMProvider,
+  ProviderLimitReason,
+  RateLimitStatus,
+} from '@/shared/types.js';
+
+/**
+ * Sessions an automatic handoff has already been started for, and in which
+ * mode. Claude reports its rate-limit state repeatedly and a failed turn can
+ * surface the same limit more than once, so without this every repeat would
+ * open another fallback session for the same conversation. In memory on
+ * purpose: after a restart a still-limited session simply hands off again.
+ */
+const claimedSessions = new Map<string, LimitHandoffMode>();
+
+/**
+ * Claims an automatic handoff for a session; false when one in this mode (or
+ * a stronger one) was already claimed. A `continue` claim may follow a
+ * `standby` one: a user who kept working in the original session after a
+ * proactive switch still gets moved when the provider finally refuses a
+ * request. Used by `server/index.ts`; the manual route does not claim, since
+ * the user asking again is the point.
+ */
+export function tryClaimHandoff(sessionId: string, mode: LimitHandoffMode): boolean {
+  const claimed = claimedSessions.get(sessionId);
+  if (claimed === 'continue' || claimed === mode) {
+    return false;
+  }
+  claimedSessions.set(sessionId, mode);
+  return true;
+}
+
+/** Gives a claim back after a handoff that failed, so a later signal can retry. Used by `server/index.ts`. */
+export function releaseHandoffClaim(sessionId: string): void {
+  claimedSessions.delete(sessionId);
+}
+
+/** How long a provider is skipped as a fallback when its limit gave no reset time. */
+const DEFAULT_LIMIT_COOLDOWN_MS = 60 * 60 * 1000;
+
+/**
+ * Providers known to be at their limit, with when to try them again. Without
+ * it two exhausted backends hand a conversation back and forth forever: the
+ * fallback hits its own limit and the only provider it excludes is itself.
+ */
+const limitedProviders = new Map<LLMProvider, number>();
+
+/** Records that `provider` hit a limit until `untilMs` (default: one hour from now). Exported for this module's tests. */
+export function markProviderLimited(provider: LLMProvider, untilMs: number = Date.now() + DEFAULT_LIMIT_COOLDOWN_MS): void {
+  limitedProviders.set(provider, untilMs);
+}
+
+/** True while a recorded limit on `provider` has not yet reset. Exported for this module's tests. */
+export function isProviderLimited(provider: LLMProvider, now: number = Date.now()): boolean {
+  const until = limitedProviders.get(provider);
+  if (until === undefined) {
+    return false;
+  }
+  if (until <= now) {
+    limitedProviders.delete(provider);
+    return false;
+  }
+  return true;
+}
+
+/** Clears the in-memory claim and limit records. Used only by this module's tests. */
+export function resetHandoffState(): void {
+  claimedSessions.clear();
+  limitedProviders.clear();
+}
 
 /**
  * Utilization percentage, as `RateLimitStatus.utilization * 100`, at which
@@ -118,49 +189,75 @@ const REASON_LABEL: Record<ProviderLimitReason, string> = {
 };
 
 /**
- * Picks the first provider in `fallbackOrder` that is not `excludeProvider`
- * and has a live runtime. Returns `null` when none qualifies (e.g. every
- * fallback has been exhausted too, or the order is empty), so the caller can
- * report "no fallback available" instead of looping forever.
+ * Lists the providers in `fallbackOrder` a session may be handed to, in
+ * order: not `excludeProvider`, with a registered runtime, and not currently
+ * recorded as at its own limit. Whether each is installed and signed in is
+ * checked separately by `handoffSessionOnLimit`, since that lookup is async.
+ */
+export function listFallbackCandidates(
+  fallbackOrder: LLMProvider[],
+  excludeProvider: LLMProvider,
+  runtime: ProviderRuntimeGateway,
+): LLMProvider[] {
+  return fallbackOrder.filter((provider) =>
+    provider !== excludeProvider && runtime.hasRuntime(provider) && !isProviderLimited(provider));
+}
+
+/**
+ * The first of `listFallbackCandidates`, or `null` when none qualifies (the
+ * order is empty, or every fallback is at its own limit too), so the caller
+ * can report "no fallback available" instead of looping forever.
  */
 export function pickFallbackProvider(
   fallbackOrder: LLMProvider[],
   excludeProvider: LLMProvider,
   runtime: ProviderRuntimeGateway,
 ): LLMProvider | null {
-  return fallbackOrder.find((provider) => provider !== excludeProvider && runtime.hasRuntime(provider)) ?? null;
+  return listFallbackCandidates(fallbackOrder, excludeProvider, runtime)[0] ?? null;
+}
+
+/** True when `provider` is installed and signed in, so a session handed to it can actually run. */
+async function isProviderReady(provider: LLMProvider): Promise<boolean> {
+  try {
+    const status = await providerAuthService.getProviderAuthStatus(provider);
+    return status.installed && status.authenticated;
+  } catch {
+    return false;
+  }
 }
 
 /**
- * Continues a session's conversation on a fallback provider after its
- * current provider hit a subscription/rate limit (see
- * `detectProviderLimit` in the providers module, which decides *whether* to
- * call this).
+ * Moves a session's conversation to a fallback provider after its current
+ * provider hit a subscription/rate limit, or is about to.
  *
- * Reads the full history of `fromSessionId`, opens a brand-new app session
- * for the chosen fallback provider in the same project, writes that history
- * to its own file (`writeHandoffContextFile`, not inlined into the prompt —
- * see its doc comment), and starts the new session's first turn with a short
- * note identifying the reason and the file's path — the fallback provider
- * never receives any of the original provider's native session state, auth,
- * or process, only an ordinary first message pointing at a file. This is
- * intentionally the same path (`runDetachedChatTurn`) every other turn in
- * the app goes through; no provider's subprocess spawning or credential
- * handling is touched here.
+ * Records the original provider as limited, picks the first fallback that is
+ * installed, signed in and not itself limited, writes the session's history
+ * to a file (`writeHandoffContextFile`), opens a new session for the fallback
+ * in the same project and starts it with a short note pointing at that file.
+ * `mode` decides what the note asks for — see `LimitHandoffMode`. The
+ * fallback receives none of the original provider's session state, auth or
+ * process, only an ordinary first message.
  *
- * Consumed by whatever layer first wires live limit detection into a running
- * chat turn (not yet done — see the handoff module's README/report); callable
- * directly today for a manual "continue on another backend" action or tests.
+ * Resolves once the fallback's turn has started, not when it ends, and tells
+ * every connected client with a `handoff_notice` event so the switch shows
+ * up in the original session instead of only in the server log.
+ *
+ * Consumed by `handoff.routes.ts` (manual) and `server/index.ts` (automatic).
  */
 export async function handoffSessionOnLimit(
   input: {
     fromSessionId: string;
     userId: number;
     reason: ProviderLimitReason;
+    /** Defaults to `continue`. */
+    mode?: LimitHandoffMode;
+    /** When the original provider's limit resets (ISO), if it said. */
+    resetsAt?: string;
     /** Overrides `DEFAULT_FALLBACK_ORDER` — e.g. a user's configured backend priority. */
     fallbackOrder?: LLMProvider[];
   },
   runtime: ProviderRuntimeGateway,
+  isReady: (provider: LLMProvider) => Promise<boolean> = isProviderReady,
 ): Promise<LimitHandoffResult> {
   const fromSession = sessionsDb.getSessionById(input.fromSessionId);
   if (!fromSession) {
@@ -171,9 +268,18 @@ export async function handoffSessionOnLimit(
   }
 
   const fromProvider = fromSession.provider as LLMProvider;
-  const toProvider = pickFallbackProvider(input.fallbackOrder ?? DEFAULT_FALLBACK_ORDER, fromProvider, runtime);
+  const resetsAtMs = input.resetsAt ? Date.parse(input.resetsAt) : Number.NaN;
+  markProviderLimited(fromProvider, Number.isFinite(resetsAtMs) && resetsAtMs > Date.now() ? resetsAtMs : undefined);
+
+  let toProvider: LLMProvider | null = null;
+  for (const candidate of listFallbackCandidates(input.fallbackOrder ?? DEFAULT_FALLBACK_ORDER, fromProvider, runtime)) {
+    if (await isReady(candidate)) {
+      toProvider = candidate;
+      break;
+    }
+  }
   if (!toProvider) {
-    throw new AppError('No fallback backend is available to continue this session.', {
+    throw new AppError('No fallback backend is available to continue this session: each one is not installed, not signed in, or at its own limit.', {
       code: 'NO_FALLBACK_PROVIDER',
       statusCode: 409,
     });
@@ -191,13 +297,19 @@ export async function handoffSessionOnLimit(
   );
 
   const contextFilePath = await writeHandoffContextFile(toSessionId, historyText);
+  const mode = input.mode ?? 'continue';
 
-  const openingMessage = [
-    `[Continued automatically: the previous backend hit ${REASON_LABEL[input.reason]}.]`,
-    `The prior conversation is saved at ${contextFilePath} — read it first, then continue from where it leaves off.`,
-  ].join('\n\n');
+  const openingMessage = mode === 'continue'
+    ? [
+      `[Continued automatically: the previous backend hit ${REASON_LABEL[input.reason]}.]`,
+      `The prior conversation is saved at ${contextFilePath} — read it first, then continue from where it leaves off.`,
+    ].join('\n\n')
+    : [
+      `[Switched automatically: the previous backend is close to ${REASON_LABEL[input.reason]}.]`,
+      `The prior conversation is saved at ${contextFilePath} — read it so you have the context. Its last turn finished normally, so do not start any work yet: reply briefly that you are ready and wait for the next instruction.`,
+    ].join('\n\n');
 
-  const dispatch = await runDetachedChatTurn(
+  const dispatch = await startDetachedChatTurn(
     { sessionId: toSessionId, userId: input.userId, content: openingMessage },
     { runtime },
   );
@@ -208,11 +320,14 @@ export async function handoffSessionOnLimit(
     });
   }
 
-  return {
+  const result: LimitHandoffResult = {
     fromSessionId: input.fromSessionId,
     fromProvider,
     toSessionId,
     toProvider,
     reason: input.reason,
+    mode,
   };
+  broadcastToConnectedClients(JSON.stringify({ kind: 'handoff_notice', sessionId: input.fromSessionId, ...result }));
+  return result;
 }

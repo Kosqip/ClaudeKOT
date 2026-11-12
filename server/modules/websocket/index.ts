@@ -5,7 +5,9 @@ export { chatRunRegistry, onRunSettled } from './services/chat-run-registry.serv
 // sessions it (re)indexed from disk through the same builder the chat gateway
 // uses, so both paths put the identical delta on the wire.
 export { broadcastSessionUpserted, broadcastSessionUpsertedBatch } from './services/session-upsert-broadcast.service.js';
+// startDetachedChatTurn: used by the mix, task-router, orchestrator and handoff
+// modules to start a turn without holding their HTTP request open until it ends.
 // runDetachedChatTurn: used by the scheduled-messages module to run a turn
 // from a timer, with no socket to stream to or report errors on.
-export { runDetachedChatTurn } from './services/chat-websocket.service.js';
+export { runDetachedChatTurn, startDetachedChatTurn } from './services/chat-websocket.service.js';
 export type { ProviderRuntimeGateway } from './services/chat-websocket.service.js';

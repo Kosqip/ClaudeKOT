@@ -100,10 +100,11 @@ export function detectProviderLimit(
   }
 
   if (provider === 'openrouter') {
-    // openrouter-runtime.provider.ts throws `OpenRouter request failed (<status>): ...`
-    // for any non-ok response, so the status code is always in parentheses —
-    // no need to guess from the response body's wording.
-    const statusMatch = signal.message?.match(/OpenRouter request failed \((\d+)\)/);
+    // openrouter-runtime.provider.ts reports `<service> request failed (<status>): ...`
+    // for any non-ok response, where <service> is the model's service prefix
+    // (openrouter, anthropic, openai), so the status code is always in
+    // parentheses — no need to guess from the response body's wording.
+    const statusMatch = signal.message?.match(/\b(?:openrouter|anthropic|openai) request failed \((\d+)\)/i);
     if (statusMatch && statusMatch[1] === '429') {
       return { detected: true, reason: 'rate_limit' };
     }

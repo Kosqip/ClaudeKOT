@@ -4,6 +4,10 @@
 // rate-limit wiring.
 export { handoffSessionOnLimit } from '@/modules/handoff/services/limit-handoff.service.js';
 
+// tryClaimHandoff / releaseHandoffClaim: used by server/index.ts so a session
+// gets one automatic handoff however many times its limit is reported.
+export { releaseHandoffClaim, tryClaimHandoff } from '@/modules/handoff/services/limit-handoff.service.js';
+
 // shouldHandoffForRateLimitStatus / DEFAULT_HANDOFF_THRESHOLD_PERCENT: used
 // by server/index.ts to decide, from a live rate_limit_status message and
 // the user's configured threshold preference, whether to call

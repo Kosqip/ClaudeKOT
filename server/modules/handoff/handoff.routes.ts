@@ -49,14 +49,11 @@ function readFallbackOrder(value: unknown): LLMProvider[] | undefined {
 const router = express.Router();
 
 /**
- * Manually continues a session on a fallback provider, carrying its full
- * history over as the fallback's opening message.
- *
- * This is the same action an automatic limit-triggered handoff will perform
- * once live detection is wired into a running chat turn (not yet done — the
- * detector in the providers module and this endpoint are the two pieces
- * built so far). Exposed now so the flow can be exercised by hand or by
- * other backend code ahead of that wiring.
+ * Manually moves a session to a fallback provider, carrying its history
+ * over — the same action `server/index.ts` performs automatically when a
+ * running turn reports a usage limit, here on the user's request and
+ * without the one-handoff-per-session claim the automatic path takes.
+ * Responds once the fallback session's turn has started.
  */
 router.post(
   '/trigger',

@@ -114,6 +114,19 @@ export const FILE_STATUS_GROUPS: GitStatusGroupEntry[] = [
 
 //----------------- MCP SERVER CAPABILITIES ------------
 
+/**
+ * Display name for each backend, for anywhere a provider id would otherwise
+ * be shown to the user. Used by the chat, mix, task-router, orchestrator,
+ * handoff and provider-roles modules.
+ */
+export const LLM_PROVIDER_NAMES: Record<LLMProvider, string> = {
+  claude: 'Claude',
+  cursor: 'Cursor',
+  codex: 'Codex',
+  opencode: 'OpenCode',
+  openrouter: 'Custom API',
+};
+
 /** Display name for each provider that can host MCP servers, used in headings and buttons. */
 export const MCP_PROVIDER_NAMES: Record<McpProvider, string> = {
   claude: 'Claude',

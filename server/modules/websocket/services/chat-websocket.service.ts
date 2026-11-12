@@ -97,8 +97,10 @@ type ChatWebSocketDependencies = {
   /** Central dispatcher for every provider SDK/CLI runtime. */
   runtime: ProviderRuntimeGateway;
   /**
-   * Called with a failed run's raw error text whenever one completes with a
-   * thrown error, so the composition root (`server/index.ts`) can decide
+   * Called with a run's raw error text — when the runtime throws, and for
+   * every `error` message a runtime emits itself (Codex and the API provider
+   * report failures that way and never throw; one failure can therefore
+   * arrive here twice) — so the composition root (`server/index.ts`) can decide
    * whether it was a subscription/rate limit and trigger an automatic
    * handoff to a fallback backend — kept out of this module as a callback,
    * not a direct import, so the websocket module never depends on the
@@ -332,31 +334,44 @@ async function dispatchRun(
   // display, or an immediate handoff on `status: 'rejected'`) without
   // waiting for the run to actually throw — Claude's SDK can report a
   // rejection as this message with the run otherwise still settling normally.
-  const writerWithLimitSignal: ProviderRuntimeWriter = {
-    // Explicit delegation, not a `{ ...run.writer }` spread: `run.writer` is
-    // a class instance, and spreading would copy its methods detached from
-    // `this`, breaking any internal `this.foo` reference the moment they are
-    // called on this plain wrapper object instead of the instance.
-    send(data: unknown) {
-      run.writer.send(data);
-      const message = data as AnyRecord;
+  //
+  // An `error` message is handed to `onRunFailed` the same way: Codex and the
+  // API provider catch their own failures, report them as an `error` message
+  // and resolve normally, so the `catch` below never sees them.
+  const inspectOutgoingMessage = (data: unknown): void => {
+    const message = data as AnyRecord | null;
+    try {
       if (message?.kind === 'rate_limit_status' && message.rateLimitStatus) {
-        try {
-          dependencies.onRateLimitStatus?.({
-            provider,
-            sessionId,
-            userId,
-            status: message.rateLimitStatus as RateLimitStatus,
-          });
-        } catch (hookError) {
-          console.error('[Chat] onRateLimitStatus hook threw', { sessionId, error: hookError });
-        }
+        dependencies.onRateLimitStatus?.({
+          provider,
+          sessionId,
+          userId,
+          status: message.rateLimitStatus as RateLimitStatus,
+        });
+      } else if (message?.kind === 'error' && typeof message.content === 'string' && message.content) {
+        dependencies.onRunFailed?.({ provider, sessionId, userId, message: message.content });
       }
-    },
-    setSessionId: run.writer.setSessionId ? (id: string) => run.writer.setSessionId!(id) : undefined,
-    userId: run.writer.userId,
-    isWebSocketWriter: run.writer.isWebSocketWriter,
+    } catch (hookError) {
+      console.error('[Chat] limit-signal hook threw', { sessionId, error: hookError });
+    }
   };
+
+  // A Proxy rather than a hand-written wrapper object: runtimes reach for
+  // more of the writer than `ProviderRuntimeWriter` names (`updateWebSocket`,
+  // `getSessionId`), and a wrapper that forgot one would silently lose it.
+  // Methods are bound to the real instance so its `this` stays intact.
+  const writerWithLimitSignal = new Proxy(run.writer, {
+    get(target, property) {
+      if (property === 'send') {
+        return (data: unknown) => {
+          target.send(data);
+          inspectOutgoingMessage(data);
+        };
+      }
+      const value = Reflect.get(target, property, target) as unknown;
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  }) as ProviderRuntimeWriter;
 
   let failure: string | null = null;
   try {
@@ -969,6 +984,49 @@ export async function runDetachedChatTurn(
     { sessionId: input.sessionId, content: input.content, options: input.options ?? {} },
     dependencies,
   );
+}
+
+/**
+ * Starts a turn like `runDetachedChatTurn` but resolves as soon as the turn
+ * is admitted instead of when it ends: `started` reports whether the run
+ * began, and `completion` settles with the finished turn's outcome.
+ *
+ * Used by the mix, task-router, orchestrator and handoff modules, whose HTTP
+ * requests open sessions the user then watches live — awaiting the whole
+ * turn there would hold the request open for as long as the agent works.
+ * The refusals `runDetachedChatTurn` can give are checked up front so they
+ * are reported in `started`/`error` rather than only inside `completion`.
+ */
+export async function startDetachedChatTurn(
+  input: Parameters<typeof runDetachedChatTurn>[0],
+  dependencies: ChatWebSocketDependencies,
+): Promise<{
+  started: boolean;
+  error: string | null;
+  completion: Promise<{ started: boolean; error: string | null }>;
+}> {
+  const refuse = (error: string) => ({
+    started: false,
+    error,
+    completion: Promise.resolve({ started: false, error }),
+  });
+
+  const session = sessionsDb.getSessionById(input.sessionId);
+  if (!session) {
+    return refuse('The session no longer exists.');
+  }
+  if (!dependencies.runtime.hasRuntime(session.provider)) {
+    return refuse(`Provider "${session.provider}" is not available.`);
+  }
+  if (!input.interruptActiveRun && chatRunRegistry.getRun(input.sessionId)?.status === 'running') {
+    return refuse('A run was already in progress for this session.');
+  }
+
+  const completion = runDetachedChatTurn(input, dependencies).catch((error: unknown) => ({
+    started: false,
+    error: error instanceof Error ? error.message : String(error),
+  }));
+  return { started: true, error: null, completion };
 }
 
 export function handleChatConnection(

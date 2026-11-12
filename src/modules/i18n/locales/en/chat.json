@@ -195,7 +195,11 @@
       "willRead": "{{provider}} reads it at its next tool call",
       "attachments_one": "{{count}} file attached",
       "attachments_other": "{{count}} files attached"
-    }
+    },
+    "rateLimitUsage": "Claude usage: {{percent}}%",
+    "handoffContinued": "{{from}} hit its usage limit — this conversation continues in a new {{to}} session.",
+    "handoffStandby": "{{from}} is close to its usage limit — a {{to}} session with this conversation is ready to take over.",
+    "handoffOpen": "Open"
   },
   "composer": {
     "reasoning": "Reasoning",
@@ -476,5 +480,48 @@
     "customModelsOnlyHint": "Hide the built-in {{provider}} models from every model picker and make your first model the default. Built-in models stay listed until you add a model.",
     "builtInModelsHidden": "Hidden from model pickers while “Use only my models” is on.",
     "customModelsOnlyFailed": "Unable to change this setting."
+  },
+  "backendTools": {
+    "open": "Open",
+    "started": "started",
+    "failed": "failed",
+    "mix": {
+      "label": "Send to several sessions",
+      "description": "Send one message to several sessions of this project at once — pick two or more.",
+      "placeholder": "Message to send to every selected session",
+      "send": "Send to selected",
+      "sending": "Sending…",
+      "untitledSession": "Untitled session"
+    },
+    "router": {
+      "label": "Route by task type",
+      "description": "Routine goes to a free model, coding to Claude, a second opinion to Claude and Codex together. A complex decision is never routed automatically.",
+      "placeholder": "Task to route",
+      "route": "Route task",
+      "routing": "Routing…",
+      "tags": {
+        "auto": "Detect automatically",
+        "routine": "Routine",
+        "coding": "Coding",
+        "second_opinion": "Second opinion",
+        "complex": "Complex decision"
+      },
+      "tagDetected": "Type: {{tag}} (detected automatically)",
+      "tagChosen": "Type: {{tag}} (chosen manually)",
+      "noTag": "The task type could not be detected from this text — pick a type above, or send the task to a backend yourself.",
+      "complexHint": "This is a complex decision — pick a backend yourself instead of routing it automatically."
+    },
+    "orchestrator": {
+      "label": "Split into subtasks",
+      "description": "This session plans the work, then each subtask is sent to the backend that holds its role.",
+      "placeholder": "Task to split into subtasks",
+      "split": "Split into subtasks",
+      "splitting": "Planning…",
+      "skipped": "skipped",
+      "roles": {
+        "hands": "hands",
+        "routine": "routine"
+      }
+    }
   }
 }

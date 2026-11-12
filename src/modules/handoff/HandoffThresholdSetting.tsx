@@ -9,10 +9,10 @@ import {
 } from '@/shared/userSettings';
 
 /**
- * Global (not per-provider) control for when the handoff module continues a
- * Claude session on a fallback backend automatically: at a hard rejection
- * only (100), or proactively once claude.ai's own reported utilization
- * reaches one of 95/90/85/80 percent. Rendered once in the agents settings
+ * Global (not per-provider) control for when the handoff module moves a
+ * Claude session to a fallback backend automatically: at a hard rejection
+ * only (100), or — prepared at the end of the running reply — once
+ * claude.ai's own reported utilization reaches one of 95/90/85/80 percent. Rendered once in the agents settings
  * tab, below the per-provider account/model sections — this setting is not
  * scoped to any one provider.
  */
@@ -32,12 +32,10 @@ export default function HandoffThresholdSetting() {
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <div className="font-medium text-foreground">
-            {t('agents.handoffThreshold.title', { defaultValue: 'Automatic backend handoff' })}
+            {t('agents.handoffThreshold.title')}
           </div>
           <div className="text-sm text-muted-foreground">
-            {t('agents.handoffThreshold.description', {
-              defaultValue: 'When Claude’s own usage reaches this level, continue the session on a fallback backend automatically. "Only on full limit" waits for a hard rejection instead.',
-            })}
+            {t('agents.handoffThreshold.description')}
           </div>
         </div>
         <select
@@ -48,8 +46,8 @@ export default function HandoffThresholdSetting() {
           {HANDOFF_THRESHOLD_OPTIONS.map((option) => (
             <option key={option} value={option}>
               {option === 100
-                ? t('agents.handoffThreshold.onlyFullLimit', { defaultValue: 'Only on full limit' })
-                : t('agents.handoffThreshold.atPercent', { defaultValue: `At ${option}%`, percent: option })}
+                ? t('agents.handoffThreshold.onlyFullLimit')
+                : t('agents.handoffThreshold.atPercent', { percent: option })}
             </option>
           ))}
         </select>

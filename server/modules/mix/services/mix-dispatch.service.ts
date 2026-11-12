@@ -1,15 +1,16 @@
 import { sessionsDb } from '@/modules/database/index.js';
-import { runDetachedChatTurn } from '@/modules/websocket/index.js';
+import { startDetachedChatTurn } from '@/modules/websocket/index.js';
 import type { ProviderRuntimeGateway } from '@/modules/websocket/index.js';
 import type { AnyRecord, LLMProvider, MixDispatchResult, MixTarget } from '@/shared/types.js';
 
 /**
  * Fans one user message out to several already-existing provider sessions in
  * parallel, each kept on the independent dispatch path a single-provider send
- * already uses (`runDetachedChatTurn`), so no provider's runtime, auth, or
- * subprocess handling is touched by this module.
+ * already uses, so no provider's runtime, auth, or subprocess handling is
+ * touched by this module. Resolves once every turn has started — not when
+ * the turns end, which the user watches in each session.
  *
- * Every target is dispatched through its own `runDetachedChatTurn` call, and
+ * Every target is dispatched through its own `startDetachedChatTurn` call, and
  * a target's failure (unknown session, unsupported provider, a run already
  * in progress) is caught and reported in its own result entry — it never
  * rejects the others or the overall promise. Each session continues to
@@ -38,7 +39,7 @@ export async function dispatchMixTurn(
       }
 
       try {
-        const result = await runDetachedChatTurn(
+        const result = await startDetachedChatTurn(
           {
             sessionId: target.sessionId,
             userId: input.userId,

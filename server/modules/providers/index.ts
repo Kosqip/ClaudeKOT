@@ -4,6 +4,10 @@ export { providerMcpService } from './services/mcp.service.js';
 export { providerCapabilitiesService } from './services/provider-capabilities.service.js';
 export { providerRuntimeService } from './services/provider-runtime.service.js';
 
+// providerAuthService: used by the handoff module to skip a fallback backend
+// that is not installed or not signed in before handing a session to it.
+export { providerAuthService } from './services/provider-auth.service.js';
+
 // detectProviderLimit: used by the handoff module to tell a subscription/rate
 // limit apart from an ordinary runtime failure before switching backends.
 // mapClaudeRateLimitType: used by the handoff module's proactive threshold

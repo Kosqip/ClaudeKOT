@@ -4,7 +4,7 @@ import { sessionsDb } from '@/modules/database/index.js';
 import { dispatchMixTurn } from '@/modules/mix/index.js';
 import { classifyTask } from '@/modules/task-router/services/task-router.service.js';
 import type { ProviderRuntimeGateway } from '@/modules/websocket/index.js';
-import { runDetachedChatTurn } from '@/modules/websocket/index.js';
+import { startDetachedChatTurn } from '@/modules/websocket/index.js';
 import type { LLMProvider, TaskRouterDispatchResult, TaskRouterSessionResult, TaskTag } from '@/shared/types.js';
 
 /**
@@ -24,7 +24,7 @@ async function dispatchToNewSession(
   const sessionId = randomUUID();
   try {
     sessionsDb.createAppSession(sessionId, provider, projectPath);
-    const dispatch = await runDetachedChatTurn({ sessionId, userId, content }, { runtime });
+    const dispatch = await startDetachedChatTurn({ sessionId, userId, content }, { runtime });
     return { provider, sessionId, started: dispatch.started, error: dispatch.error ?? undefined };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -46,6 +46,10 @@ async function dispatchToNewSession(
  *   function creates itself rather than two the user already had open).
  * - `complex` → nothing is dispatched; the original spec calls this tag out
  *   as requiring the user's own explicit backend choice, not auto-routing.
+ * - no tag (no keyword matched) → nothing is dispatched either, and `tag` is
+ *   reported as `null` rather than passed off as a detected `complex`.
+ *
+ * Resolves once the routed turns have started, not when they end.
  *
  * `tag` is resolved by the caller via `classifyTask` (exported from this
  * module's sibling, re-exported here too since the route needs both the
@@ -66,7 +70,7 @@ export async function dispatchTaskByTag(
 
   if (tag === null || tag === 'complex') {
     return {
-      tag: tag ?? 'complex',
+      tag,
       autoDetected,
       manualSelectionRequired: true,
       sessions: [],

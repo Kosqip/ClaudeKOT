@@ -10,7 +10,7 @@ import express, { type NextFunction, type Request, type Response } from 'express
 import cors from 'cors';
 
 import { AppError, findApplicationRoot, getModuleDirectory, IS_PLATFORM, terminalTextStyles } from '@/shared/utils.js';
-import type { LLMProvider, RateLimitStatus } from '@/shared/types.js';
+import type { LimitHandoffMode, LLMProvider, ProviderLimitReason, RateLimitStatus } from '@/shared/types.js';
 import {
     closeSessionsWatcher,
     detectProviderLimit,
@@ -18,11 +18,13 @@ import {
     providerRuntimeService,
     reapOrphanedOpenCodeServers,
 } from '@/modules/providers/index.js';
-import { chatRunRegistry, createWebSocketServer } from '@/modules/websocket/index.js';
+import { chatRunRegistry, createWebSocketServer, onRunSettled } from '@/modules/websocket/index.js';
 import {
     DEFAULT_HANDOFF_THRESHOLD_PERCENT,
     handoffSessionOnLimit,
+    releaseHandoffClaim,
     shouldHandoffForRateLimitStatus,
+    tryClaimHandoff,
 } from '@/modules/handoff/index.js';
 
 import { getConnectableHost } from '../shared/networkHosts.js';
@@ -115,52 +117,6 @@ const agentRoutes = createAgentModule({
 // (agents, workflows, backgrounded commands) is still reporting through it.
 chatRunRegistry.setRetentionGuard((sessionId) => providerRuntimeService.hasBackgroundWork(sessionId));
 
-/**
- * Wires live limit detection to automatic handoff: every failed chat run's
- * raw error text is checked against `detectProviderLimit` for that
- * provider, and a hit starts a new session on a fallback backend with the
- * failed session's history carried over (`handoffSessionOnLimit`).
- *
- * Deliberately a plain function passed into `createWebSocketServer`'s `chat`
- * dependencies, not a direct import inside the websocket module itself —
- * the handoff module already imports `runDetachedChatTurn` from the
- * websocket module, so a websocket -> handoff import here would cycle.
- * This composition root is the one place both modules are already wired
- * together, so it is the only safe place for this call.
- *
- * Silently does nothing when no limit is detected, the user id cannot be
- * read as a number (e.g. an unauthenticated or system-triggered run), or no
- * fallback backend is installed — `handoffSessionOnLimit` throws in that
- * last case, which this catches and logs rather than ever surfacing as a
- * second failure on top of the run that already failed.
- */
-function handleRunFailureForAutoHandoff(input: { provider: Parameters<typeof detectProviderLimit>[0]; sessionId: string; userId: string | number | null; message: string }): void {
-    const detection = detectProviderLimit(input.provider, { message: input.message });
-    if (!detection.detected) {
-        return;
-    }
-
-    const userId = Number(input.userId);
-    if (!Number.isInteger(userId)) {
-        console.warn('[Handoff] Limit detected but no authenticated user id to hand off under', {
-            sessionId: input.sessionId,
-            provider: input.provider,
-        });
-        return;
-    }
-
-    handoffSessionOnLimit(
-        { fromSessionId: input.sessionId, userId, reason: detection.reason },
-        providerRuntimeService,
-    )
-        .then((result) => {
-            console.log('[Handoff] Auto-continued session on a fallback backend', result);
-        })
-        .catch((error) => {
-            console.error('[Handoff] Auto-handoff failed', { sessionId: input.sessionId, error });
-        });
-}
-
 const KNOWN_LLM_PROVIDERS: LLMProvider[] = ['claude', 'codex', 'cursor', 'opencode', 'openrouter'];
 
 /**
@@ -179,28 +135,89 @@ function readStoredFallbackOrder(userId: number): LLMProvider[] | undefined {
     return isValid ? stored as LLMProvider[] : undefined;
 }
 
+type AutoHandoffRequest = {
+    sessionId: string;
+    userId: number;
+    reason: ProviderLimitReason;
+    mode: LimitHandoffMode;
+    resetsAt?: string;
+};
+
+/**
+ * Sessions whose provider crossed the proactive threshold while a turn was
+ * still running. Handing off right then would put two agents to work on the
+ * same task in the same folder, so the switch waits for that turn to settle
+ * (`onRunSettled` below).
+ */
+const pendingProactiveHandoffs = new Map<string, AutoHandoffRequest>();
+
+/**
+ * Starts one automatic handoff. The handoff and websocket modules cannot
+ * import each other (handoff needs the websocket module to start a turn), so
+ * this composition root is where a limit signal from a running chat turn is
+ * turned into a `handoffSessionOnLimit` call. A session is claimed first, so
+ * a limit reported several times opens one fallback session, not several;
+ * a failure is logged and the claim given back, never surfaced as a second
+ * error on top of the turn that already failed.
+ */
+function startAutoHandoff(request: AutoHandoffRequest): void {
+    if (!tryClaimHandoff(request.sessionId, request.mode)) {
+        return;
+    }
+    pendingProactiveHandoffs.delete(request.sessionId);
+
+    handoffSessionOnLimit(
+        {
+            fromSessionId: request.sessionId,
+            userId: request.userId,
+            reason: request.reason,
+            mode: request.mode,
+            resetsAt: request.resetsAt,
+            fallbackOrder: readStoredFallbackOrder(request.userId),
+        },
+        providerRuntimeService,
+    )
+        .then((result) => {
+            console.log('[Handoff] Session moved to a fallback backend', result);
+        })
+        .catch((error) => {
+            releaseHandoffClaim(request.sessionId);
+            console.error('[Handoff] Auto-handoff failed', { sessionId: request.sessionId, error });
+        });
+}
+
+/** Reads a run's user id as the number the handoff needs; null for an unauthenticated or system-triggered run. */
+function readHandoffUserId(userId: string | number | null): number | null {
+    const parsed = Number(userId);
+    return userId !== null && Number.isInteger(parsed) ? parsed : null;
+}
+
+/**
+ * A run's error text — thrown, or sent by the runtime as an `error` message —
+ * checked for that provider's limit wording. This is the only limit signal
+ * Codex and the API provider give; Claude's arrives as `rate_limit_status`.
+ */
+function handleRunFailureForAutoHandoff(input: { provider: LLMProvider; sessionId: string; userId: string | number | null; message: string }): void {
+    const detection = detectProviderLimit(input.provider, { message: input.message });
+    const userId = readHandoffUserId(input.userId);
+    if (!detection.detected || userId === null) {
+        return;
+    }
+    startAutoHandoff({ sessionId: input.sessionId, userId, reason: detection.reason, mode: 'continue' });
+}
+
 /**
  * Claude's SDK pushes a `rate_limit_status` message whenever claude.ai's
- * utilization changes, including `status: 'allowed_warning'` well before any
- * request is actually rejected. By default (and whenever the user has not
- * picked a stricter/looser option in settings), this hands off proactively
- * once utilization reaches `DEFAULT_HANDOFF_THRESHOLD_PERCENT` — not only on
- * a hard `rejected` — so a session is already running on a fallback backend
- * before Claude actually refuses a request. A user who prefers to wait for
- * the hard stop can set their `handoffThresholdPercent` preference to 100.
+ * utilization changes, including `allowed_warning` well before any request
+ * is rejected. A rejection moves the session at once and has the fallback
+ * continue the interrupted work. Reaching the user's threshold
+ * (`handoffThresholdPercent`, default `DEFAULT_HANDOFF_THRESHOLD_PERCENT`;
+ * 100 turns this off) without a rejection only schedules the move for when
+ * the running turn ends, and the fallback then waits for instructions.
  */
 function handleRateLimitStatusForAutoHandoff(input: { provider: LLMProvider; sessionId: string; userId: string | number | null; status: RateLimitStatus }): void {
-    const userId = Number(input.userId);
-    if (!Number.isInteger(userId)) {
-        // Only a rejected request is worth warning about with no user id to
-        // hand off under — a proactive warning with nobody to act on it is
-        // not actionable and would just be noise in the logs.
-        if (input.status.status === 'rejected') {
-            console.warn('[Handoff] Limit detected but no authenticated user id to hand off under', {
-                sessionId: input.sessionId,
-                provider: input.provider,
-            });
-        }
+    const userId = readHandoffUserId(input.userId);
+    if (userId === null) {
         return;
     }
 
@@ -212,17 +229,26 @@ function handleRateLimitStatusForAutoHandoff(input: { provider: LLMProvider; ses
         return;
     }
 
-    handoffSessionOnLimit(
-        { fromSessionId: input.sessionId, userId, reason: decision.reason, fallbackOrder: readStoredFallbackOrder(userId) },
-        providerRuntimeService,
-    )
-        .then((result) => {
-            console.log('[Handoff] Auto-continued session on a fallback backend', { ...result, thresholdPercent, proactive: input.status.status !== 'rejected' });
-        })
-        .catch((error) => {
-            console.error('[Handoff] Auto-handoff failed', { sessionId: input.sessionId, error });
-        });
+    const request: AutoHandoffRequest = {
+        sessionId: input.sessionId,
+        userId,
+        reason: decision.reason,
+        mode: input.status.status === 'rejected' ? 'continue' : 'standby',
+        resetsAt: input.status.resetsAt,
+    };
+    if (request.mode === 'continue') {
+        startAutoHandoff(request);
+    } else {
+        pendingProactiveHandoffs.set(input.sessionId, request);
+    }
 }
+
+onRunSettled((sessionId) => {
+    const pending = pendingProactiveHandoffs.get(sessionId);
+    if (pending) {
+        startAutoHandoff(pending);
+    }
+});
 
 createWebSocketServer(server, {
     verifyClient: {

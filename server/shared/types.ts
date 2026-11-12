@@ -246,7 +246,8 @@ export type GatewayEventKind =
   | 'loading_progress'
   | 'protocol_error'
   | 'side_question'
-  | 'scheduled_messages_changed';
+  | 'scheduled_messages_changed'
+  | 'handoff_notice';
 
 /**
  * Complete set of `kind` values emitted to websocket clients.
@@ -1882,7 +1883,18 @@ export type LimitHandoffResult = {
   toSessionId: string;
   toProvider: LLMProvider;
   reason: ProviderLimitReason;
+  mode: LimitHandoffMode;
 };
+
+/**
+ * What the fallback session is asked to do with the history it is handed.
+ * `continue` picks the interrupted work straight back up — used when the
+ * original provider actually refused a request. `standby` only loads the
+ * context and waits — used for a proactive switch made at the end of a turn
+ * that finished normally, where there is nothing left unfinished to resume
+ * and "continuing" would have the fallback invent work.
+ */
+export type LimitHandoffMode = 'continue' | 'standby';
 
 /**
  * Claude's own live rate-limit utilization, carried on a `rate_limit_status`
@@ -1982,7 +1994,8 @@ export type TaskRouterSessionResult = {
  * the user for a backend instead of treating an empty list as a failure.
  */
 export type TaskRouterDispatchResult = {
-  tag: TaskTag;
+  /** `null` when no tag was given and no keyword matched. */
+  tag: TaskTag | null;
   /** False when the caller passed an explicit tag; true when a keyword match (or no match) decided it. */
   autoDetected: boolean;
   manualSelectionRequired: boolean;

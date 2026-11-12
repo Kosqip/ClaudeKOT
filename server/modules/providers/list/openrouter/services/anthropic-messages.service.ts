@@ -72,5 +72,20 @@ export function createAnthropicMessagesAdapter(): ChatServiceAdapter {
 
       return undefined;
     },
+
+    readStreamError(payload: string): string | undefined {
+      let parsed: AnyRecord;
+      try {
+        parsed = JSON.parse(payload);
+      } catch {
+        return undefined;
+      }
+
+      // `{"type":"error","error":{"type":"overloaded_error","message":"..."}}`
+      if (parsed.type !== 'error') {
+        return undefined;
+      }
+      return String(parsed.error?.message ?? parsed.error?.type ?? 'The service reported an error.');
+    },
   };
 }

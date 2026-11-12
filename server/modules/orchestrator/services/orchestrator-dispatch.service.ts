@@ -8,7 +8,7 @@ import {
   resolveSubtaskProvider,
 } from '@/modules/orchestrator/services/orchestrator-plan.service.js';
 import type { ProviderRuntimeGateway } from '@/modules/websocket/index.js';
-import { runDetachedChatTurn } from '@/modules/websocket/index.js';
+import { runDetachedChatTurn, startDetachedChatTurn } from '@/modules/websocket/index.js';
 import { AppError } from '@/shared/utils.js';
 import type { LLMProvider, OrchestratorSubtaskResult, ProviderRole } from '@/shared/types.js';
 
@@ -36,6 +36,9 @@ function findLatestAssistantContent(messages: Array<{ role?: 'user' | 'assistant
  * one brand-new session per subtask on whichever provider the user has
  * assigned that subtask's role (`hands`/`routine`) and starts it with the
  * subtask's description as its first message.
+ *
+ * The plan turn is awaited — its reply is what gets parsed — but subtasks
+ * only have to start: this resolves without waiting for them to finish.
  *
  * Subtasks are dispatched once and never themselves split further — this is
  * intentionally one level of delegation, not a recursive planner. A subtask
@@ -110,7 +113,7 @@ export async function planAndDispatchOrchestratorTask(
       const sessionId = randomUUID();
       sessionsDb.createAppSession(sessionId, provider, orchestratorSession.project_path ?? '', subtask.title);
 
-      const dispatch = await runDetachedChatTurn(
+      const dispatch = await startDetachedChatTurn(
         { sessionId, userId: input.userId, content: subtask.description },
         { runtime },
       );

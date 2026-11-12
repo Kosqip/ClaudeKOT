@@ -39,8 +39,16 @@ async function runOpenRouter(
   const { service, modelId } = parseModelReference(model ?? '');
   const adapter = getServiceAdapter(service);
 
-  if (isNewSession) {
+  // The chat gateway always passes its own app session id, so `isNewSession`
+  // is false there — but the session still has no provider id recorded until
+  // this runtime names one, and without it the app treats the session as
+  // having no transcript: reopening it shows an empty history. This runtime
+  // has no id of its own, so the app session id doubles as the provider id.
+  if (isNewSession || !context.resolveProviderSessionId(sessionId)) {
     writer.setSessionId?.(sessionId);
+  }
+
+  if (isNewSession) {
     writer.send(createNormalizedMessage({
       kind: 'session_created',
       newSessionId: sessionId,
@@ -48,19 +56,6 @@ async function runOpenRouter(
       provider: PROVIDER,
       model,
     }));
-  }
-
-  const apiKey = adapter.readApiKey();
-  if (!apiKey) {
-    const errorMessage = createNormalizedMessage({
-      kind: 'error',
-      content: `${adapter.envVarName} is not set on the server.`,
-      sessionId,
-      provider: PROVIDER,
-    });
-    writer.send(errorMessage);
-    writer.send(createCompleteMessage({ provider: PROVIDER, sessionId, exitCode: 1 }));
-    return;
   }
 
   const priorHistory = await readOpenRouterHistory(sessionId);
@@ -72,6 +67,22 @@ async function runOpenRouter(
     provider: PROVIDER,
   });
   await appendOpenRouterHistoryRow(userTurn);
+
+  // A failure is written to the transcript as well as streamed: a session
+  // reopened later would otherwise show the question with nothing after it
+  // and no hint of what went wrong.
+  const reportError = async (content: string): Promise<void> => {
+    const errorMessage = createNormalizedMessage({ kind: 'error', content, sessionId, provider: PROVIDER });
+    writer.send(errorMessage);
+    await appendOpenRouterHistoryRow(errorMessage);
+  };
+
+  const apiKey = adapter.readApiKey();
+  if (!apiKey) {
+    await reportError(`${adapter.envVarName} is not set on the server.`);
+    writer.send(createCompleteMessage({ provider: PROVIDER, sessionId, exitCode: 1 }));
+    return;
+  }
 
   const abortController = new AbortController();
   activeApiRequests.set(sessionId, abortController);
@@ -114,6 +125,10 @@ async function runOpenRouter(
         }
 
         const payload = line.slice('data:'.length).trim();
+        const streamError = adapter.readStreamError(payload);
+        if (streamError) {
+          throw new Error(`${service} stream failed: ${streamError}`);
+        }
         const deltaText = adapter.readStreamDelta(payload);
         if (deltaText) {
           assembledText += deltaText;
@@ -130,12 +145,7 @@ async function runOpenRouter(
   } catch (error) {
     aborted = abortController.signal.aborted;
     if (!aborted) {
-      writer.send(createNormalizedMessage({
-        kind: 'error',
-        content: error instanceof Error ? error.message : String(error),
-        sessionId,
-        provider: PROVIDER,
-      }));
+      await reportError(error instanceof Error ? error.message : String(error));
     }
   } finally {
     activeApiRequests.delete(sessionId);

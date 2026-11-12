@@ -67,3 +67,19 @@ test('cursor and opencode have no known limit signal and always report not detec
   assert.deepEqual(detectProviderLimit('cursor', { message: 'rate limit quota 429' }), { detected: false });
   assert.deepEqual(detectProviderLimit('opencode', { message: 'rate limit quota 429' }), { detected: false });
 });
+
+test('the API provider limit is recognised for each service the runtime actually names', () => {
+  // The runtime builds this text from the model's service prefix, lowercase.
+  for (const service of ['openrouter', 'anthropic', 'openai']) {
+    assert.deepEqual(
+      detectProviderLimit('openrouter', { message: `${service} request failed (429): slow down` }),
+      { detected: true, reason: 'rate_limit' },
+      service,
+    );
+    assert.deepEqual(
+      detectProviderLimit('openrouter', { message: `${service} request failed (500): boom` }),
+      { detected: false },
+      service,
+    );
+  }
+});

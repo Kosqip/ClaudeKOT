@@ -10,8 +10,10 @@ import { MarkdownWorkspaceContext } from '@/modules/chat/context/MarkdownWorkspa
 import { TranscriptSessionContext } from '@/modules/chat/context/TranscriptSessionContext';
 import { api } from '@/shared/api';
 import { cn } from '@/shared/utils';
+import { LLM_PROVIDER_NAMES } from '@/shared/constants';
 import type {
   ChatMessage,
+  HandoffNotice,
   LLMProvider,
   Project,
   ProjectSession,
@@ -31,6 +33,7 @@ import {
 } from '@/shared/context/SessionProtectionContext';
 import ChatMessagesPane from '@/modules/chat/transcript/ChatMessagesPane';
 import ChatComposer from '@/modules/chat/composer/ChatComposer';
+import BackendToolsBar from '@/modules/chat/composer/BackendToolsBar';
 import CommandResultModal from '@/modules/chat/modals/CommandResultModal';
 import { MixSendPanel } from '@/modules/mix';
 import { OrchestratorPlanPanel } from '@/modules/orchestrator';
@@ -101,6 +104,12 @@ function ChatInterface({
   const [rateLimitStatusBySession, setRateLimitStatusBySession] = useState<Record<string, RateLimitStatus>>({});
   const handleRateLimitStatus = useCallback((sessionId: string, status: RateLimitStatus) => {
     setRateLimitStatusBySession((previous) => ({ ...previous, [sessionId]: status }));
+  }, []);
+  // The latest backend switch per original session, shown as a banner there
+  // so an automatic handoff is never something the user has to discover.
+  const [handoffNoticeBySession, setHandoffNoticeBySession] = useState<Record<string, HandoffNotice>>({});
+  const handleHandoffNotice = useCallback((notice: HandoffNotice) => {
+    setHandoffNoticeBySession((previous) => ({ ...previous, [notice.sessionId]: notice }));
   }, []);
   // Highest live `seq` observed per session. Written by the realtime handler
   // on every sequenced frame, read whenever a `chat.subscribe` is sent so the
@@ -325,9 +334,51 @@ function ChatInterface({
     sessionStore,
     onSteerOutcome: handleSteerOutcome,
     onRateLimitStatus: handleRateLimitStatus,
+    onHandoffNotice: handleHandoffNotice,
   });
 
-  const currentRateLimitStatus = currentSessionId ? rateLimitStatusBySession[currentSessionId] : undefined;
+  const viewedSessionId = currentSessionId || selectedSession?.id || null;
+  const currentRateLimitStatus = viewedSessionId ? rateLimitStatusBySession[viewedSessionId] : undefined;
+  const currentHandoffNotice = viewedSessionId ? handoffNoticeBySession[viewedSessionId] : undefined;
+
+  // The multi-backend tools offered under the composer. The orchestrator one
+  // exists only in a session whose provider holds the orchestrator role.
+  const projectPath = selectedProject?.fullPath || selectedProject?.path || '';
+  const isOrchestratorSession = Boolean(viewedSessionId)
+    && readUserPreference('providerRoles', {} as Partial<Record<LLMProvider, string>>)[provider] === 'orchestrator';
+  const backendTools = [
+    ...(selectedProject?.projectId
+      ? [{
+        id: 'mix',
+        label: t('backendTools.mix.label'),
+        content: <MixSendPanel projectId={selectedProject.projectId} />,
+      }]
+      : []),
+    ...(selectedProject
+      ? [{
+        id: 'router',
+        label: t('backendTools.router.label'),
+        content: (
+          <TaskRouterPanel
+            projectPath={projectPath}
+            onOpenSession={(sessionId) => onNavigateToSession?.(sessionId)}
+          />
+        ),
+      }]
+      : []),
+    ...(isOrchestratorSession && viewedSessionId
+      ? [{
+        id: 'orchestrator',
+        label: t('backendTools.orchestrator.label'),
+        content: (
+          <OrchestratorPlanPanel
+            sessionId={viewedSessionId}
+            onOpenSubtaskSession={(subtaskSessionId) => onNavigateToSession?.(subtaskSessionId)}
+          />
+        ),
+      }]
+      : []),
+  ];
 
   // Lets other modules (the quick settings Commands tab) hand text to the
   // composer: append it after a separating space, then focus the textarea with
@@ -641,6 +692,32 @@ function ChatInterface({
         />
         </div>
 
+        {currentHandoffNotice ? (
+          <div
+            role="status"
+            className="mx-4 mb-2 flex items-center justify-between gap-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-900/30 dark:text-amber-100"
+          >
+            <span>
+              {currentHandoffNotice.mode === 'continue'
+                ? t('input.handoffContinued', {
+                  from: LLM_PROVIDER_NAMES[currentHandoffNotice.fromProvider],
+                  to: LLM_PROVIDER_NAMES[currentHandoffNotice.toProvider],
+                })
+                : t('input.handoffStandby', {
+                  from: LLM_PROVIDER_NAMES[currentHandoffNotice.fromProvider],
+                  to: LLM_PROVIDER_NAMES[currentHandoffNotice.toProvider],
+                })}
+            </span>
+            <button
+              type="button"
+              className="shrink-0 font-medium underline"
+              onClick={() => onNavigateToSession?.(currentHandoffNotice.toSessionId)}
+            >
+              {t('input.handoffOpen')}
+            </button>
+          </div>
+        ) : null}
+
         {currentRateLimitStatus && typeof currentRateLimitStatus.utilization === 'number' ? (
           <div className="flex items-center gap-2 px-4 pb-2 text-xs text-muted-foreground">
             <div className="h-1.5 w-24 overflow-hidden rounded-full bg-muted">
@@ -658,37 +735,13 @@ function ChatInterface({
             </div>
             <span>
               {t('input.rateLimitUsage', {
-                defaultValue: 'Claude usage: {{percent}}%',
                 percent: Math.round(currentRateLimitStatus.utilization * 100),
               })}
             </span>
           </div>
         ) : null}
 
-        {selectedProject?.sessions && selectedProject.sessions.length >= 2 ? (
-          <div className="px-4 pb-3">
-            <MixSendPanel candidates={selectedProject.sessions} />
-          </div>
-        ) : null}
-
-        {selectedProject ? (
-          <div className="px-4 pb-3">
-            <TaskRouterPanel
-              projectPath={selectedProject.fullPath || selectedProject.path || ''}
-              onOpenSession={(sessionId) => onNavigateToSession?.(sessionId)}
-            />
-          </div>
-        ) : null}
-
-        {(currentSessionId || selectedSession?.id)
-          && readUserPreference('providerRoles', {} as Partial<Record<LLMProvider, string>>)[provider] === 'orchestrator' ? (
-            <div className="px-4 pb-3">
-              <OrchestratorPlanPanel
-                sessionId={currentSessionId || selectedSession!.id}
-                onOpenSubtaskSession={(subtaskSessionId) => onNavigateToSession?.(subtaskSessionId)}
-              />
-            </div>
-          ) : null}
+        <BackendToolsBar tools={backendTools} />
       </div>
 
       <CommandResultModal
