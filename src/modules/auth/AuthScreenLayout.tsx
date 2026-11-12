@@ -36,8 +36,8 @@ export default function AuthScreenLayout({
           <div className="text-center">
             <div className="mb-5 flex justify-center">
               {logo ?? (
-                <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-primary to-primary/80 shadow-lg shadow-primary/25 ring-1 ring-inset ring-white/20">
-                  <img src="/logo.svg" alt="ClaudeKOT" className="h-9 w-9" />
+                <div className="h-16 w-16 overflow-hidden rounded-2xl shadow-lg shadow-primary/25">
+                  <img src="/logo.svg" alt="ClaudeKOT" className="h-full w-full" />
                 </div>
               )}
             </div>
