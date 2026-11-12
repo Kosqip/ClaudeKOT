@@ -1946,31 +1946,63 @@ export type RateLimitStatus = {
 export type ProviderRole = 'orchestrator' | 'hands' | 'routine';
 
 /**
+ * What a delegated subtask may do in the project folder. `read` is for
+ * looking things up, reviewing and answering — the backend is started with
+ * its editing tools withheld (see `buildSubtaskTurnOptions`); `write` is
+ * ordinary full access. Because every subtask works in the same folder,
+ * `write` subtasks run one at a time while `read` ones may run together.
+ */
+export type OrchestratorSubtaskAccess = 'read' | 'write';
+
+/**
  * One subtask of an orchestrator's plan, exactly as parsed from its JSON
  * response — `role` is still the abstract role, not yet resolved to a
  * concrete provider (that happens in `resolveSubtaskProvider`, against the
- * caller's own `providerRoles`).
+ * caller's own `providerRoles`). A plan that names no `access` gets `write`.
  */
 export type OrchestratorSubtask = {
   title: string;
   description: string;
   role: 'hands' | 'routine';
+  access: OrchestratorSubtaskAccess;
 };
 
+/** Where one subtask of a run stands. `skipped`: no backend holds its role, or the run was cancelled before its turn. */
+export type OrchestratorSubtaskStatus = 'pending' | 'running' | 'done' | 'failed' | 'skipped';
+
 /**
- * One subtask after dispatch: its abstract role, the concrete provider and
- * new session it was sent to (absent when no provider holds that role), and
- * whether the turn actually started. Mirrors `MixDispatchResult`'s shape
- * (`started`/`error`) for the same reason — the subtask's own reply streams
- * through its new session's ordinary `chat.subscribe` channel, not through
- * this result.
+ * One subtask of a run as the UI shows it: the plan entry, the backend and
+ * session it was given to, how it ended, and the round of the run it
+ * belongs to. Its full reply lives in its own session; `error` says why a
+ * failed or skipped one did not produce a result.
  */
 export type OrchestratorSubtaskResult = {
   title: string;
   role: 'hands' | 'routine';
+  access: OrchestratorSubtaskAccess;
+  round: number;
+  status: OrchestratorSubtaskStatus;
   provider?: LLMProvider;
   sessionId?: string;
-  started: boolean;
+  error?: string;
+};
+
+/**
+ * One orchestrated task from start to finish. The orchestrator plans, the
+ * subtasks run, their results go back to the orchestrator, which either
+ * closes the task with a summary or asks for another round of subtasks —
+ * up to `maxRounds`. `phase` is what is happening now; `summary` is the
+ * orchestrator's closing word once `phase` is `done`.
+ */
+export type OrchestratorRun = {
+  id: string;
+  orchestratorSessionId: string;
+  task: string;
+  phase: 'planning' | 'running' | 'reviewing' | 'done' | 'failed' | 'cancelled';
+  round: number;
+  maxRounds: number;
+  subtasks: OrchestratorSubtaskResult[];
+  summary?: string;
   error?: string;
 };
 

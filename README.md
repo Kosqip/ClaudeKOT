@@ -36,7 +36,7 @@ Every agent has its own strengths and its own limits. ClaudeKOT keeps them in on
 | **Offer at a threshold** | A usage indicator in the chat and a "Continue on …" button once the threshold is reached (80/85/90/95%, or off). Works for Claude and Codex. |
 | **Several sessions at once** | One message sent to several sessions on different backends. |
 | **By task type** | Routing by plain rules from `task-router.config.json` (keywords you edit by hand, no AI classifier). |
-| **Split into subtasks** | The backend with the "orchestrator" role drafts a plan; subtasks open as separate sessions on the "hands" and "routine" backends. |
+| **Orchestrator** | The backend with the "orchestrator" role plans a task and coordinates it: subtasks go to the "hands" and "routine" backends as separate sessions — read-only ones side by side, editing ones one at a time — their results come back, and the orchestrator closes the task or sends follow-ups (up to 4 rounds). |
 | **Backend roles** | In settings: who leads, who executes, who takes routine work. |
 | **Shared skills** | One set of skills visible to both Claude and Codex. |
 | **Russian interface** | Every new element is translated; the app follows your browser language. |
@@ -88,7 +88,7 @@ Restart `npm start` after changing `.env`.
 ### Where things are configured
 
 - **Settings → Agents**: handoff threshold, fallback order, backend roles, skills.
-- **Below the chat input**: "Several sessions", "By task type", "Split into subtasks".
+- **Below the chat input**: "Several sessions", "By task type", "Orchestrator".
 - **`task-router.config.json`** in the repository root: keywords for routing by task type.
 
 ## Status

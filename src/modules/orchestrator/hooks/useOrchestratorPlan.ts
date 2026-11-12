@@ -1,51 +1,129 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
-import { api } from '@/shared/api.js';
-import type { LLMProvider } from '@/shared/types.js';
+import { api } from '@/shared/api';
+import type { LLMProvider } from '@/shared/types';
 
-/** One subtask's outcome after the orchestrator split the task and dispatched it, as the plan endpoint reports it. */
+/** One subtask of an orchestrated task as the server reports it (mirrors the server's `OrchestratorSubtaskResult`). */
 export type OrchestratorSubtaskResult = {
   title: string;
   role: 'hands' | 'routine';
+  access: 'read' | 'write';
+  round: number;
+  status: 'pending' | 'running' | 'done' | 'failed' | 'skipped';
   provider?: LLMProvider;
   sessionId?: string;
-  started: boolean;
   error?: string;
 };
 
-/**
- * Asks the given orchestrator session to split one task into subtasks and
- * tracks the in-flight/result state for `OrchestratorPlanPanel`.
- *
- * Each dispatched subtask keeps streaming its own reply through the chat
- * view already subscribed to its new session id — this hook only reports
- * the plan and which subtasks started, mirroring `useMixDispatch`.
- */
-export function useOrchestratorPlan() {
-  const [isPlanning, setIsPlanning] = useState(false);
-  const [subtasks, setSubtasks] = useState<OrchestratorSubtaskResult[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
+/** One orchestrated task from start to finish (mirrors the server's `OrchestratorRun`). */
+export type OrchestratorRun = {
+  id: string;
+  orchestratorSessionId: string;
+  task: string;
+  phase: 'planning' | 'running' | 'reviewing' | 'done' | 'failed' | 'cancelled';
+  round: number;
+  maxRounds: number;
+  subtasks: OrchestratorSubtaskResult[];
+  summary?: string;
+  error?: string;
+};
 
-  const plan = useCallback(async (sessionId: string, task: string): Promise<OrchestratorSubtaskResult[]> => {
-    setIsPlanning(true);
+const POLL_INTERVAL_MS = 2000;
+
+/** True while the server is still working on the run. */
+export function isOrchestratorRunActive(run: OrchestratorRun | null): boolean {
+  return run?.phase === 'planning' || run?.phase === 'running' || run?.phase === 'reviewing';
+}
+
+async function readRun(response: Response): Promise<OrchestratorRun | null> {
+  const body = await response.json().catch(() => null);
+  if (!response.ok) {
+    throw new Error(body?.error?.message ?? 'The orchestrator request failed.');
+  }
+  return (body?.data?.run ?? null) as OrchestratorRun | null;
+}
+
+/**
+ * Starts orchestrated tasks from one session and follows the current one for
+ * `OrchestratorPlanPanel`: the server works on a run on its own, so this
+ * asks for its state every couple of seconds while it is active, and picks
+ * the session's latest run back up when the panel mounts (after a reload,
+ * or on returning to the session).
+ */
+export function useOrchestratorPlan(sessionId: string) {
+  const [run, setRun] = useState<OrchestratorRun | null>(null);
+  const [isStarting, setIsStarting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  // Guards against a slow answer for a previous session landing in this one.
+  const sessionRef = useRef(sessionId);
+
+  useEffect(() => {
+    sessionRef.current = sessionId;
+    let cancelled = false;
+    void api.orchestrator.latestRun(sessionId).then(readRun).then(
+      (latest) => {
+        if (!cancelled) {
+          setRun(latest);
+          setError(null);
+        }
+      },
+      () => {
+        if (!cancelled) {
+          setRun(null);
+        }
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionId]);
+
+  const runId = run?.id;
+  const active = isOrchestratorRunActive(run);
+  useEffect(() => {
+    if (!runId || !active) {
+      return undefined;
+    }
+    const timer = setInterval(() => {
+      void api.orchestrator.run(runId).then(readRun).then(
+        (next) => {
+          if (next && sessionRef.current === next.orchestratorSessionId) {
+            setRun(next);
+          }
+        },
+        // A missed poll is retried by the next one; a server that forgot the run (restart) ends it here.
+        (caught: unknown) => {
+          if (caught instanceof Error && /no longer known/.test(caught.message)) {
+            setRun((current) => (current?.id === runId ? { ...current, phase: 'failed', error: caught.message } : current));
+          }
+        },
+      );
+    }, POLL_INTERVAL_MS);
+    return () => clearInterval(timer);
+  }, [runId, active]);
+
+  const start = useCallback(async (task: string, maxRounds: number): Promise<void> => {
+    setIsStarting(true);
     setError(null);
     try {
-      const response = await api.orchestrator.plan({ sessionId, task });
-      const body = await response.json();
-      if (!response.ok) {
-        throw new Error(body?.error?.message ?? 'The orchestrator could not split this task.');
-      }
-      const result = (body.data?.subtasks ?? []) as OrchestratorSubtaskResult[];
-      setSubtasks(result);
-      return result;
+      setRun(await readRun(await api.orchestrator.plan({ sessionId, task, maxRounds })));
     } catch (caught) {
-      const message = caught instanceof Error ? caught.message : 'The orchestrator could not split this task.';
-      setError(message);
-      throw caught;
+      setError(caught instanceof Error ? caught.message : 'The orchestrator request failed.');
     } finally {
-      setIsPlanning(false);
+      setIsStarting(false);
     }
-  }, []);
+  }, [sessionId]);
 
-  return { plan, isPlanning, subtasks, error };
+  const cancel = useCallback(async (): Promise<void> => {
+    if (!runId) {
+      return;
+    }
+    try {
+      setRun(await readRun(await api.orchestrator.cancel(runId)));
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'The orchestrator request failed.');
+    }
+  }, [runId]);
+
+  return { run, isStarting, error, start, cancel };
 }

@@ -313,7 +313,10 @@ export const api = {
   // new session per subtask on whichever provider holds its role. Used by
   // the orchestrator module's plan panel.
   orchestrator: {
-    plan: (body: { sessionId: string; task: string }) => post('/api/orchestrator/plan', body),
+    plan: (body: { sessionId: string; task: string; maxRounds?: number }) => post('/api/orchestrator/plan', body),
+    run: (runId: string) => get(`/api/orchestrator/runs/${encodeURIComponent(runId)}`),
+    latestRun: (sessionId: string) => get(`/api/orchestrator/runs${query({ sessionId })}`),
+    cancel: (runId: string) => post(`/api/orchestrator/runs/${encodeURIComponent(runId)}/cancel`, {}),
   },
 
   // Moves a session's conversation to the next backend in the user's

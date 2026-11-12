@@ -229,7 +229,9 @@ function transformCodexEvent(event: AnyRecord): AnyRecord {
 
 /**
  * Map permission mode to Codex SDK options
- * @param {string} permissionMode - 'default', 'acceptEdits', or 'bypassPermissions'
+ * @param {string} permissionMode - 'default', 'acceptEdits', 'bypassPermissions', or 'readOnly'
+ *   ('readOnly' is what the orchestrator gives a look-but-don't-touch subtask: Codex's own
+ *   read-only sandbox, which refuses writes instead of asking about them)
  * @returns {object} - { sandboxMode, approvalPolicy }
  */
 function mapPermissionModeToCodexOptions(permissionMode: string): Pick<ThreadOptions, 'sandboxMode' | 'approvalPolicy'> {
@@ -237,6 +239,11 @@ function mapPermissionModeToCodexOptions(permissionMode: string): Pick<ThreadOpt
     case 'acceptEdits':
       return {
         sandboxMode: 'workspace-write',
+        approvalPolicy: 'never'
+      };
+    case 'readOnly':
+      return {
+        sandboxMode: 'read-only',
         approvalPolicy: 'never'
       };
     case 'bypassPermissions':

@@ -526,7 +526,7 @@
     },
     "providerRoles": {
       "title": "Backend roles",
-      "description": "Used by \"Split into subtasks\" in the chat: the orchestrator plans the work, \"hands\" and \"routine\" backends receive the subtasks.",
+      "description": "Used by \"Orchestrator\" in the chat: the orchestrator plans the work, \"hands\" and \"routine\" backends receive the subtasks.",
       "roles": {
         "none": "No role",
         "orchestrator": "Orchestrator",

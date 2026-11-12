@@ -24,6 +24,10 @@ export {
 // automatic path.
 export { readStoredFallbackOrder, suggestHandoff } from '@/modules/handoff/services/limit-handoff.service.js';
 
+// isProviderLimited: lets the orchestrator module pass over a backend that
+// is at its usage limit when it picks who gets a subtask.
+export { isProviderLimited } from '@/modules/handoff/services/limit-handoff.service.js';
+
 // Mounted at /api/handoff in server/index.ts, behind the same
 // authenticateToken middleware every other provider-facing route uses.
 export { default as handoffRoutes } from '@/modules/handoff/handoff.routes.js';

@@ -1,14 +1,23 @@
-// planAndDispatchOrchestratorTask: splits a task into subtasks on an
-// orchestrator session and dispatches each to a new session on whichever
-// provider holds that subtask's role. Exported for this module's own tests
-// and for whatever future layer needs to trigger it outside the route.
-export { planAndDispatchOrchestratorTask } from '@/modules/orchestrator/services/orchestrator-dispatch.service.js';
+// startOrchestratorRun and its readers: an orchestrated task — plan, subtasks
+// on the backends holding their roles, review, optional follow-up rounds.
+// Exported for this module's own tests and for whatever future layer needs
+// to trigger a run outside the route.
+export {
+  cancelOrchestratorRun,
+  createOrchestratorRunDependencies,
+  findLatestOrchestratorRun,
+  getOrchestratorRun,
+  startOrchestratorRun,
+} from '@/modules/orchestrator/services/orchestrator-dispatch.service.js';
 
-// buildPlanRequestPrompt / parseOrchestratorPlan / resolveSubtaskProvider:
-// the orchestrator's own pure logic, exported for this module's tests.
+// The orchestrator's own pure logic (prompts, parsers, step grouping, access
+// options), exported for this module's tests.
 export {
   buildPlanRequestPrompt,
+  buildSubtaskTurnOptions,
+  groupSubtasksIntoSteps,
   parseOrchestratorPlan,
+  parseOrchestratorReview,
   resolveSubtaskProvider,
 } from '@/modules/orchestrator/services/orchestrator-plan.service.js';
 

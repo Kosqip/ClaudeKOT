@@ -2,7 +2,14 @@ import express from 'express';
 import type { Request, Response } from 'express';
 
 import { userPreferencesDb } from '@/modules/database/index.js';
-import { planAndDispatchOrchestratorTask } from '@/modules/orchestrator/services/orchestrator-dispatch.service.js';
+import {
+  cancelOrchestratorRun,
+  createOrchestratorRunDependencies,
+  findLatestOrchestratorRun,
+  getOrchestratorRun,
+  ORCHESTRATOR_MAX_ROUNDS_LIMIT,
+  startOrchestratorRun,
+} from '@/modules/orchestrator/services/orchestrator-dispatch.service.js';
 import { providerRuntimeService } from '@/modules/providers/index.js';
 import type { LLMProvider, ProviderRole } from '@/shared/types.js';
 import { AppError, asyncHandler, createApiSuccessResponse } from '@/shared/utils.js';
@@ -53,13 +60,35 @@ function readTask(value: unknown): string {
   return value;
 }
 
+function readMaxRounds(value: unknown): number | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 1 || value > ORCHESTRATOR_MAX_ROUNDS_LIMIT) {
+    throw new AppError(`maxRounds must be a whole number from 1 to ${ORCHESTRATOR_MAX_ROUNDS_LIMIT}.`, {
+      code: 'INVALID_REQUEST_BODY',
+      statusCode: 400,
+    });
+  }
+  return value;
+}
+
+function requireRun<T>(run: T | null): T {
+  if (!run) {
+    throw new AppError('This orchestrated task is no longer known to the server.', {
+      code: 'ORCHESTRATOR_RUN_NOT_FOUND',
+      statusCode: 404,
+    });
+  }
+  return run;
+}
+
 const router = express.Router();
 
 /**
- * Manually splits one task into subtasks on the orchestrator's own session,
- * then opens one new session per subtask on whichever provider the user has
- * assigned that subtask's role (see `planAndDispatchOrchestratorTask`'s doc
- * comment for the full flow and its deliberate one-level-only scope).
+ * Starts an orchestrated task on the given session and answers at once with
+ * the run, still planning; the client follows it through `GET /runs/:id`
+ * (see `startOrchestratorRun` for the whole flow).
  */
 router.post(
   '/plan',
@@ -70,16 +99,43 @@ router.post(
     }
 
     const userId = readUserId(req);
-    const subtasks = await planAndDispatchOrchestratorTask(
+    const { run, finished } = startOrchestratorRun(
       {
         orchestratorSessionId: body.sessionId,
         userId,
         task: readTask(body.task),
         providerRoles: readStoredProviderRoles(userId),
+        maxRounds: readMaxRounds(body.maxRounds),
       },
-      providerRuntimeService,
+      createOrchestratorRunDependencies(providerRuntimeService),
     );
-    res.json(createApiSuccessResponse({ subtasks }));
+    void finished;
+    res.json(createApiSuccessResponse({ run }));
+  }),
+);
+
+/** The latest run started from a session (`?sessionId=`), or `run: null` — lets the panel pick a run back up after a reload. */
+router.get(
+  '/runs',
+  asyncHandler(async (req: Request, res: Response) => {
+    const sessionId = typeof req.query.sessionId === 'string' ? req.query.sessionId : '';
+    res.json(createApiSuccessResponse({ run: sessionId ? findLatestOrchestratorRun(sessionId) : null }));
+  }),
+);
+
+/** One run as it stands now. */
+router.get(
+  '/runs/:runId',
+  asyncHandler(async (req: Request, res: Response) => {
+    res.json(createApiSuccessResponse({ run: requireRun(getOrchestratorRun(String(req.params.runId))) }));
+  }),
+);
+
+/** Stops a run from starting anything further (see `cancelOrchestratorRun`). */
+router.post(
+  '/runs/:runId/cancel',
+  asyncHandler(async (req: Request, res: Response) => {
+    res.json(createApiSuccessResponse({ run: requireRun(cancelOrchestratorRun(String(req.params.runId))) }));
   }),
 );
 

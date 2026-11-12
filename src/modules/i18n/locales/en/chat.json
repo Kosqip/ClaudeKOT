@@ -518,12 +518,33 @@
       "complexHint": "This is a complex decision — pick a backend yourself instead of routing it automatically."
     },
     "orchestrator": {
-      "label": "Split into subtasks",
-      "description": "This session plans the work, then each subtask is sent to the backend that holds its role.",
-      "placeholder": "Task to split into subtasks",
-      "split": "Split into subtasks",
-      "splitting": "Planning…",
-      "skipped": "skipped",
+      "label": "Orchestrator",
+      "description": "This session plans the task and coordinates it: each subtask goes to the backend with the matching role, the results come back here, and this session either closes the task or sends follow-up subtasks.",
+      "placeholder": "The task to coordinate",
+      "split": "Start",
+      "splitting": "Starting…",
+      "cancel": "Stop",
+      "rounds": "Rounds",
+      "round": "Round {{round}}",
+      "phase": {
+        "planning": "Planning…",
+        "running": "Subtasks are running (round {{round}} of {{maxRounds}})",
+        "reviewing": "Checking the results…",
+        "done": "Done",
+        "failed": "Failed",
+        "cancelled": "Stopped"
+      },
+      "status": {
+        "pending": "waiting",
+        "running": "working",
+        "done": "done",
+        "failed": "failed",
+        "skipped": "skipped"
+      },
+      "access": {
+        "read": "read only",
+        "write": "can edit"
+      },
       "roles": {
         "hands": "hands",
         "routine": "routine"
