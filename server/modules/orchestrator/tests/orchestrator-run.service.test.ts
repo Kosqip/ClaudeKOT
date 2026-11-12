@@ -93,7 +93,8 @@ test('a run plans, gives each subtask to its role\'s backend with its access, re
     ]);
 
     const [study, build] = subtaskTurns();
-    assert.match(study.content, /read-only subtask/);
+    // The routine backend here is the text-only API provider.
+    assert.match(study.content, /no access to files or commands/);
     // The write subtask runs after the read one and is told what it reported.
     assert.match(build.content, /did: Read the module/);
     assert.deepEqual(build.options, {});
@@ -140,7 +141,7 @@ test('a plan that does not parse is asked for once more before the run fails', a
   });
 });
 
-test('a failed or unassigned subtask is reported to the orchestrator instead of stopping the run', async () => {
+test('a failed subtask is reported to the orchestrator instead of stopping the run, and a role nobody holds falls back', async () => {
   const plan = { subtasks: [
     { title: 'Build', description: 'Write the code', role: 'hands', access: 'write' },
     { title: 'Tidy', description: 'Tidy up', role: 'routine', access: 'write' },
@@ -153,11 +154,11 @@ test('a failed or unassigned subtask is reported to the orchestrator instead of 
     await finished;
 
     const final = getOrchestratorRun(run.id)!;
-    assert.deepEqual(final.subtasks.map((subtask) => subtask.status), ['failed', 'skipped']);
+    assert.deepEqual(final.subtasks.map((subtask) => [subtask.status, subtask.provider]), [['failed', 'codex'], ['failed', 'codex']]);
     assert.equal(final.phase, 'done');
     const review = turns.filter((turn) => turn.sessionId === 'lead')[1].content;
     assert.match(review, /Build — failed/);
-    assert.match(review, /Tidy — skipped/);
+    assert.match(review, /Tidy — failed/);
   }, () => null);
 });
 

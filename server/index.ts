@@ -19,7 +19,7 @@ import {
     providerTokenUsageService,
     reapOrphanedOpenCodeServers,
 } from '@/modules/providers/index.js';
-import { broadcastToConnectedClients, chatRunRegistry, createWebSocketServer, onRunSettled } from '@/modules/websocket/index.js';
+import { broadcastToConnectedClients, chatRunRegistry, createWebSocketServer, onRunSettled, setDefaultChatRunHooks } from '@/modules/websocket/index.js';
 import {
     DEFAULT_HANDOFF_THRESHOLD_PERCENT,
     handoffSessionOnLimit,
@@ -314,6 +314,14 @@ function handleRunCompletedForUsage(input: { provider: LLMProvider; sessionId: s
         }
     });
 }
+
+// Turns the app starts itself (task router, orchestrator, mix, handoff,
+// scheduled messages) report limits the same way typed ones do.
+setDefaultChatRunHooks({
+    onRunFailed: handleRunFailureForAutoHandoff,
+    onRateLimitStatus: handleRateLimitStatusForAutoHandoff,
+    onRunCompleted: handleRunCompletedForUsage,
+});
 
 createWebSocketServer(server, {
     verifyClient: {

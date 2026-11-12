@@ -39,7 +39,7 @@ const FALLBACK_DEFAULT_MODEL: Record<LLMProvider, string> = {
   // any other model runs on the CLI's fallback metadata.
   codex: 'gpt-5.6-sol',
   opencode: 'anthropic/claude-sonnet-4-5',
-  openrouter: 'meta-llama/llama-3.1-8b-instruct:free',
+  openrouter: 'google/gemma-4-31b-it:free',
 };
 
 const PROVIDERS: LLMProvider[] = ['claude', 'cursor', 'codex', 'opencode', 'openrouter'];

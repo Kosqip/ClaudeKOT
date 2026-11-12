@@ -9,6 +9,7 @@ import {
   buildSubtaskPrompt,
   buildSubtaskTurnOptions,
   groupSubtasksIntoSteps,
+  isTextOnlyProvider,
   parseOrchestratorPlan,
   parseOrchestratorReview,
   resolveSubtaskProvider,
@@ -189,7 +190,7 @@ async function runSubtask(
     const turn = await dependencies.runTurn({
       sessionId,
       userId: state.userId,
-      content: buildSubtaskPrompt(subtask, earlier),
+      content: buildSubtaskPrompt(subtask, earlier, isTextOnlyProvider(provider)),
       options: buildSubtaskTurnOptions(provider, subtask.access),
     });
     if (!turn.started) {
@@ -210,8 +211,10 @@ async function runSubtask(
 /** The whole life of one run after its request has been accepted; never throws — a failure ends up on the run itself. */
 async function executeRun(state: RunState, dependencies: OrchestratorRunDependencies): Promise<void> {
   const { run } = state;
+  const textOnlyRoles = (['hands', 'routine'] as const).filter((role) =>
+    isTextOnlyProvider(resolveSubtaskProvider(role, state.providerRoles, dependencies.isProviderAvailable)));
   try {
-    let subtasks = await askOrchestrator(state, buildPlanRequestPrompt(run.task), parseOrchestratorPlan, 'plan', dependencies);
+    let subtasks = await askOrchestrator(state, buildPlanRequestPrompt(run.task, textOnlyRoles), parseOrchestratorPlan, 'plan', dependencies);
 
     for (let round = 1; round <= run.maxRounds; round += 1) {
       run.round = round;
@@ -251,7 +254,7 @@ async function executeRun(state: RunState, dependencies: OrchestratorRunDependen
       try {
         review = await askOrchestrator(
           state,
-          buildReviewPrompt(run.task, reports, round < run.maxRounds),
+          buildReviewPrompt(run.task, reports, round < run.maxRounds, textOnlyRoles),
           parseOrchestratorReview,
           'review',
           dependencies,

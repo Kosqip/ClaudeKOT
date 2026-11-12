@@ -128,6 +128,23 @@ type ChatWebSocketDependencies = {
   onRunCompleted?(input: { provider: LLMProvider; sessionId: string; userId: string | number | null }): void;
 };
 
+type ChatRunHooks = Pick<ChatWebSocketDependencies, 'onRunFailed' | 'onRateLimitStatus' | 'onRunCompleted'>;
+
+/**
+ * The run hooks every turn falls back to when its caller passes none. A
+ * turn typed into the chat carries the websocket server's hooks, but the
+ * mix, task-router, orchestrator, handoff and scheduled-message modules
+ * start turns with only a runtime — without this their sessions would never
+ * report a usage limit, so a routed or delegated task that hit one would
+ * simply stop instead of being handed to a fallback backend.
+ */
+let defaultRunHooks: ChatRunHooks = {};
+
+/** Sets the hooks used by turns started without their own. Called once by `server/index.ts`. */
+export function setDefaultChatRunHooks(hooks: ChatRunHooks): void {
+  defaultRunHooks = hooks;
+}
+
 /**
  * Extracts the authenticated request user id in the formats currently produced
  * by platform and OSS auth code paths.
@@ -349,16 +366,16 @@ async function dispatchRun(
     const message = data as AnyRecord | null;
     try {
       if (message?.kind === 'rate_limit_status' && message.rateLimitStatus) {
-        dependencies.onRateLimitStatus?.({
+        (dependencies.onRateLimitStatus ?? defaultRunHooks.onRateLimitStatus)?.({
           provider,
           sessionId,
           userId,
           status: message.rateLimitStatus as RateLimitStatus,
         });
       } else if (message?.kind === 'error' && typeof message.content === 'string' && message.content) {
-        dependencies.onRunFailed?.({ provider, sessionId, userId, message: message.content });
+        (dependencies.onRunFailed ?? defaultRunHooks.onRunFailed)?.({ provider, sessionId, userId, message: message.content });
       } else if (message?.kind === 'complete') {
-        dependencies.onRunCompleted?.({ provider, sessionId, userId });
+        (dependencies.onRunCompleted ?? defaultRunHooks.onRunCompleted)?.({ provider, sessionId, userId });
       }
     } catch (hookError) {
       console.error('[Chat] limit-signal hook threw', { sessionId, error: hookError });
@@ -394,7 +411,7 @@ async function dispatchRun(
     failure = error instanceof Error ? error.message : String(error);
     console.error(`[Chat] Provider runtime "${provider}" failed`, { sessionId, error: failure });
     try {
-      dependencies.onRunFailed?.({ provider, sessionId, userId, message: failure });
+      (dependencies.onRunFailed ?? defaultRunHooks.onRunFailed)?.({ provider, sessionId, userId, message: failure });
     } catch (hookError) {
       console.error('[Chat] onRunFailed hook threw', { sessionId, error: hookError });
     }

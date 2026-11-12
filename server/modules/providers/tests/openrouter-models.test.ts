@@ -8,7 +8,7 @@ import {
 } from '@/modules/providers/list/openrouter/openrouter-models.provider.js';
 
 const LIVE = [
-  { id: 'google/gemini-2.0-flash-001', name: 'Gemini 2.0 Flash' },
+  { id: 'google/gemini-3.8-flash', name: 'Gemini 3.8 Flash' },
   { id: 'vendor/new-model:free', name: 'New Model (free)' },
   { id: 'vendor/paid-model', name: 'Paid Model' },
 ];
@@ -18,8 +18,8 @@ test('the live catalog drops OpenRouter entries that no longer exist and moves t
   const values = catalog.OPTIONS.map((option) => option.value);
 
   // The predefined free models are not in this live list: a session on them would fail.
-  assert.equal(values.includes('meta-llama/llama-3.1-8b-instruct:free'), false);
-  assert.equal(values.includes('google/gemini-2.0-flash-001'), true);
+  assert.equal(values.includes('google/gemma-4-31b-it:free'), false);
+  assert.equal(values.includes('google/gemini-3.8-flash'), true);
   assert.equal(values.includes('vendor/new-model:free'), true);
   assert.equal(values.includes('vendor/paid-model'), false);
   // Direct Anthropic/OpenAI entries are not OpenRouter's to confirm and stay.

@@ -81,9 +81,9 @@ test('resolveSubtaskProvider returns the first provider (in LLMProvider order) h
   assert.equal(provider, 'codex');
 });
 
-test('resolveSubtaskProvider returns null when no provider holds the role', () => {
-  const provider = resolveSubtaskProvider('routine', { claude: 'orchestrator', codex: 'hands' });
-  assert.equal(provider, null);
+test('resolveSubtaskProvider returns null only when no backend holds any usable role', () => {
+  assert.equal(resolveSubtaskProvider('hands', { openrouter: 'routine' }), null);
+  assert.equal(resolveSubtaskProvider('routine', {}), null);
 });
 
 test('parseOrchestratorPlan rejects an access level it does not know', () => {
@@ -147,4 +147,41 @@ test('parseOrchestratorReview reads both verdicts and rejects anything else', ()
   assert.equal(more.status, 'continue');
   assert.throws(() => parseOrchestratorReview('{"status": "maybe"}'), /status/);
   assert.throws(() => parseOrchestratorReview('{"status": "continue", "subtasks": []}'), /subtasks/);
+});
+
+test('resolveSubtaskProvider falls back to hands, then the orchestrator, when a role has no backend of its own', () => {
+  // One subscription and one API key: nobody is "hands".
+  const roles = { claude: 'orchestrator', openrouter: 'routine' } as const;
+  assert.equal(resolveSubtaskProvider('hands', roles), 'claude');
+  assert.equal(resolveSubtaskProvider('routine', roles), 'openrouter');
+  assert.equal(resolveSubtaskProvider('routine', { claude: 'orchestrator', codex: 'hands' }), 'codex');
+  assert.equal(resolveSubtaskProvider('routine', { claude: 'orchestrator' }), 'claude');
+});
+
+test('a text-only backend is planned for and addressed as one', () => {
+  // The API provider is a chat completion: it cannot open the project folder.
+  assert.doesNotMatch(buildPlanRequestPrompt('Task'), /plain text model/);
+  assert.match(buildPlanRequestPrompt('Task', ['routine']), /"routine" backend here is a plain text model/);
+
+  const subtask = { title: 'Draft', description: 'Draft the note', role: 'routine' as const, access: 'read' as const };
+  const prompt = buildSubtaskPrompt(subtask, [], true);
+  assert.match(prompt, /no access to files or commands/);
+  // Telling a model with no tools not to edit files only confuses it.
+  assert.doesNotMatch(prompt, /read-only subtask/);
+});
+
+test('the review is told that a blocked backend is a failed subtask', () => {
+  assert.match(buildReviewPrompt('Task', [], false), /blocked, lacked access or could not do the work is a failed subtask/);
+});
+
+test('a plan whose description contains its own code fence is still read whole', () => {
+  // Seen live: the orchestrator put a file's content, fences and all, into a description.
+  const description = 'Save this file:\n```md\n# Guide\n```\nand nothing else';
+  const reply = `\`\`\`json\n${JSON.stringify({ status: 'continue', subtasks: [{ title: 'Save', description, role: 'hands', access: 'write' }] })}\n\`\`\``;
+  const review = parseOrchestratorReview(reply);
+  assert.equal(review.status, 'continue');
+  assert.equal(review.status === 'continue' && review.subtasks[0].description, description);
+
+  // Prose around an unfenced object is tolerated too.
+  assert.deepEqual(parseOrchestratorReview('Here you go: {"status": "done", "summary": "ok"} — bye'), { status: 'done', summary: 'ok' });
 });

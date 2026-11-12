@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
+import { OPENROUTER_PREDEFINED_MODELS } from '@/modules/providers/list/openrouter/openrouter-models.provider.js';
 import { readOpenRouterHistory } from '@/modules/providers/list/openrouter/openrouter-history.store.js';
 import { openRouterRuntime } from '@/modules/providers/list/openrouter/openrouter-runtime.provider.js';
 import { parseModelReference } from '@/modules/providers/list/openrouter/openrouter-service-registry.js';
@@ -113,7 +114,12 @@ test('an OpenRouter turn streams the reply, stores both sides and registers the 
 
   assert.equal(turn.calls[0].url, 'https://openrouter.ai/api/v1/chat/completions');
   assert.equal(turn.calls[0].headers.Authorization, 'Bearer or-key');
-  assert.equal(turn.calls[0].body.model, 'meta-llama/llama-3.1-8b-instruct:free');
+  // A free model is sent with free stand-ins, so OpenRouter moves on when it is refused upstream.
+  const chatCall = turn.calls.find((call) => String(call.url).includes('/chat/completions'));
+  assert.equal(chatCall?.body.model, undefined);
+  const sentModels = (chatCall?.body.models ?? []) as string[];
+  assert.equal(sentModels[0], 'meta-llama/llama-3.1-8b-instruct:free');
+  assert.equal(sentModels.length, 3);
   assert.deepEqual(turn.calls[0].body.messages, [{ role: 'user', content: 'Say hi' }]);
 
   assert.deepEqual(turn.sent.filter((message) => message.kind === 'stream_delta').map((message) => message.content), ['Hel', 'lo']);
@@ -202,4 +208,16 @@ test('a missing API key is reported without calling the service, and the questio
   assert.equal(turn.calls.length, 0);
   assert.equal(turn.sent.find((message) => message.kind === 'error')?.content, 'ANTHROPIC_DIRECT_API_KEY is not set on the server.');
   assert.deepEqual(turn.history.map((message) => message.kind), ['text', 'error']);
+});
+
+test('a turn in a session nobody picked a model for runs on the catalog default instead of an empty model', async () => {
+  // Sessions opened by the task router, the orchestrator or a handoff carry no model.
+  const turn = await runTurn({
+    model: undefined as unknown as string,
+    keys: { OPENROUTER_API_KEY: 'or-key' },
+    respond: () => sseResponse(['data: {"choices":[{"delta":{"content":"ok"}}]}\n\ndata: [DONE]\n\n']),
+  });
+
+  const chatCall = turn.calls.find((call) => String(call.url).includes('/chat/completions'));
+  assert.equal(((chatCall?.body.models ?? []) as string[])[0], OPENROUTER_PREDEFINED_MODELS.DEFAULT);
 });

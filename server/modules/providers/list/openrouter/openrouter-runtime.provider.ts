@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 
+import { listFreeModelFallbacks, openRouterProviderModels } from '@/modules/providers/list/openrouter/openrouter-models.provider.js';
 import { appendOpenRouterHistoryRow, readOpenRouterHistory } from '@/modules/providers/list/openrouter/openrouter-history.store.js';
 import {
   buildChatTurns,
@@ -35,8 +36,12 @@ async function runOpenRouter(
 ): Promise<void> {
   const isNewSession = !options.sessionId;
   const sessionId: string = options.sessionId || randomUUID();
-  const model = await context.resolveResumeModel(options.sessionId, options.model);
-  const { service, modelId } = parseModelReference(model ?? '');
+  // A session nobody picked a model for (opened by the task router, the
+  // orchestrator or a handoff) runs on the catalog default; without it the
+  // request went out with an empty model and the service refused it.
+  const model = await context.resolveResumeModel(options.sessionId, options.model)
+    || (await openRouterProviderModels.getSupportedModels()).DEFAULT;
+  const { service, modelId } = parseModelReference(model);
   const adapter = getServiceAdapter(service);
 
   // The chat gateway always passes its own app session id, so `isNewSession`
@@ -92,6 +97,15 @@ async function runOpenRouter(
 
   try {
     const request = adapter.buildRequest(modelId, buildChatTurns(priorHistory, command));
+    if (service === 'openrouter') {
+      // A free model that is refused upstream is replaced by the next free one by OpenRouter itself.
+      const models = listFreeModelFallbacks(modelId, await openRouterProviderModels.getSupportedModels());
+      if (models.length > 1) {
+        const body = request.body as AnyRecord;
+        delete body.model;
+        body.models = models;
+      }
+    }
     const response = await fetch(request.url, {
       method: 'POST',
       signal: abortController.signal,

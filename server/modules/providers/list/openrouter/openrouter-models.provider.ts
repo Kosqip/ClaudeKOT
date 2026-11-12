@@ -20,18 +20,23 @@ import { buildDefaultProviderCurrentActiveModel } from '@/shared/utils.js';
 export const OPENROUTER_PREDEFINED_MODELS: ProviderModelsDefinition = {
   OPTIONS: [
     {
-      value: 'meta-llama/llama-3.1-8b-instruct:free',
-      label: 'Llama 3.1 8B Instruct (free, OpenRouter)',
+      value: 'google/gemma-4-31b-it:free',
+      label: 'Gemma 4 31B (free, OpenRouter)',
       description: 'Free-tier OpenRouter model, good for routine/low-stakes tasks.',
     },
     {
-      value: 'mistralai/mistral-7b-instruct:free',
-      label: 'Mistral 7B Instruct (free, OpenRouter)',
+      value: 'google/gemma-4-26b-a4b-it:free',
+      label: 'Gemma 4 26B (free, OpenRouter)',
       description: 'Free-tier OpenRouter model.',
     },
     {
-      value: 'google/gemini-2.0-flash-001',
-      label: 'Gemini 2.0 Flash (OpenRouter)',
+      value: 'baidu/ernie-5.5-flash-preview:free',
+      label: 'ERNIE 5.5 Flash (free, OpenRouter)',
+      description: 'Free-tier OpenRouter model.',
+    },
+    {
+      value: 'google/gemini-3.8-flash',
+      label: 'Gemini 3.8 Flash (OpenRouter)',
       description: 'Fast, low-cost Google model via OpenRouter.',
     },
     {
@@ -45,17 +50,17 @@ export const OPENROUTER_PREDEFINED_MODELS: ProviderModelsDefinition = {
       description: 'Billed per token on ANTHROPIC_DIRECT_API_KEY — not the Claude Code subscription.',
     },
     {
-      value: 'openai:gpt-5.1',
-      label: 'GPT-5.1 (direct OpenAI API)',
+      value: 'openai:gpt-5.5',
+      label: 'GPT-5.5 (direct OpenAI API)',
       description: 'Billed per token on OPENAI_DIRECT_API_KEY.',
     },
     {
-      value: 'openai:gpt-5.1-mini',
-      label: 'GPT-5.1 mini (direct OpenAI API)',
+      value: 'openai:gpt-5.4-mini',
+      label: 'GPT-5.4 mini (direct OpenAI API)',
       description: 'Billed per token on OPENAI_DIRECT_API_KEY, cheaper/faster than the full model.',
     },
   ],
-  DEFAULT: 'meta-llama/llama-3.1-8b-instruct:free',
+  DEFAULT: 'google/gemma-4-31b-it:free',
 };
 
 const OPENROUTER_MODELS_URL = 'https://openrouter.ai/api/v1/models';
@@ -125,7 +130,7 @@ export class OpenRouterProviderModels implements IProviderModels {
   private cached: { catalog: ProviderModelsDefinition; until: number } | null = null;
 
   constructor(
-    private readonly fetchImpl: typeof fetch = fetch,
+    private readonly fetchImpl: typeof fetch = (...args) => globalThis.fetch(...args),
     private readonly hasOpenRouterKey: () => boolean = () => Boolean(process.env.OPENROUTER_API_KEY),
   ) {}
 
@@ -161,3 +166,32 @@ export class OpenRouterProviderModels implements IProviderModels {
     return buildDefaultProviderCurrentActiveModel(await this.getSupportedModels());
   }
 }
+
+/** How many models one free-tier request names: the chosen one plus stand-ins. OpenRouter accepts three. */
+const MAX_FREE_MODELS_PER_REQUEST = 3;
+
+/**
+ * The models a request for a free OpenRouter model should name: the chosen
+ * one first, then other free models from the catalog as stand-ins. Free
+ * models are refused upstream all the time ("temporarily rate-limited",
+ * "no endpoints available"); given a list, OpenRouter itself moves on to the
+ * next one instead of failing the turn. A paid or direct-API model gets no
+ * stand-ins — silently answering from a different model there would be wrong.
+ */
+export function listFreeModelFallbacks(modelId: string, catalog: ProviderModelsDefinition): string[] {
+  if (!modelId.endsWith(':free')) {
+    return [modelId];
+  }
+  const others = catalog.OPTIONS
+    .map((option) => option.value)
+    .filter((value) => value.endsWith(':free') && isOpenRouterEntry(value) && value !== modelId);
+  return [modelId, ...others].slice(0, MAX_FREE_MODELS_PER_REQUEST);
+}
+
+/**
+ * The one catalog instance shared by the provider's model adapter and its
+ * runtime, so a turn started without a model (a session opened by the task
+ * router, the orchestrator or a handoff rather than from the model picker)
+ * runs on the same default the picker would show.
+ */
+export const openRouterProviderModels = new OpenRouterProviderModels();

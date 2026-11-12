@@ -9,6 +9,19 @@ import { AppError } from '@/shared/utils.js';
  */
 const PROVIDER_RESOLUTION_ORDER: LLMProvider[] = ['claude', 'codex', 'cursor', 'opencode', 'openrouter'];
 
+/**
+ * Backends that only exchange text: no file access, no commands. The API
+ * provider is one — it is a chat completion, not an agent. Work that needs
+ * the project folder must not be planned for them, and they must be told so,
+ * or they spend their turn explaining that they cannot open a file.
+ */
+const TEXT_ONLY_PROVIDERS: LLMProvider[] = ['openrouter'];
+
+/** True when `provider` can only work from the text it is given. Used by the run to shape plans and subtask prompts. */
+export function isTextOnlyProvider(provider: LLMProvider | null): boolean {
+  return provider !== null && TEXT_ONLY_PROVIDERS.includes(provider);
+}
+
 const SUBTASK_SHAPE = '{"title": "short title", "description": "a complete, self-contained instruction — the backend that receives it has no other context from this conversation", "role": "hands", "access": "write"}';
 
 const ROLE_AND_ACCESS_RULES = [
@@ -33,11 +46,16 @@ const ROLE_AND_ACCESS_RULES = [
  * does not repair a malformed response, the caller asks once more instead
  * (`buildPlanRetryPrompt`).
  */
-export function buildPlanRequestPrompt(task: string): string {
+export function buildPlanRequestPrompt(
+  task: string,
+  /** Roles whose backend can only work from text (see `isTextOnlyProvider`); the plan must not give them file work. */
+  textOnlyRoles: Array<'hands' | 'routine'> = [],
+): string {
   return [
     'You are planning how to split a task across other AI backends, each already running independently with no shared context with you or each other.',
     'Break the task below into one or more subtasks.',
     ...ROLE_AND_ACCESS_RULES,
+    ...buildTextOnlyRule(textOnlyRoles),
     '',
     `Task:\n${task}`,
     '',
@@ -46,6 +64,16 @@ export function buildPlanRequestPrompt(task: string): string {
     `{"subtasks": [${SUBTASK_SHAPE}]}`,
     '```',
   ].join('\n');
+}
+
+function buildTextOnlyRule(textOnlyRoles: Array<'hands' | 'routine'>): string[] {
+  if (textOnlyRoles.length === 0) {
+    return [];
+  }
+  const names = textOnlyRoles.map((role) => `"${role}"`).join(' and ');
+  return [
+    `Important: the ${names} backend here is a plain text model. It cannot open files, look at the project folder or run commands. Give it only work it can do from text alone — drafting, summarising, reviewing or answering — and put everything it needs to read into the description itself.`,
+  ];
 }
 
 /** The one follow-up sent when a plan or review reply could not be parsed: names the problem and repeats the required shape. */
@@ -83,10 +111,18 @@ function renderReports(reports: SubtaskReport[]): string {
  * that it must not change anything, since not every backend can be held to
  * that by its tools alone.
  */
-export function buildSubtaskPrompt(subtask: OrchestratorSubtask, earlier: SubtaskReport[]): string {
+export function buildSubtaskPrompt(
+  subtask: OrchestratorSubtask,
+  earlier: SubtaskReport[],
+  /** The receiving backend can only work from text (see `isTextOnlyProvider`). */
+  textOnly = false,
+): string {
   return [
     subtask.description,
-    ...(subtask.access === 'read'
+    ...(textOnly
+      ? ['', 'You have no access to files or commands here: work from the text in this message alone and give your result as text. If something essential is missing, do the part you can and say exactly what is missing.']
+      : []),
+    ...(subtask.access === 'read' && !textOnly
       ? ['', 'This is a read-only subtask: do not create, edit or delete any files and do not run commands that change anything. Report what you find.']
       : []),
     ...(earlier.length > 0
@@ -102,7 +138,12 @@ export function buildSubtaskPrompt(subtask: OrchestratorSubtask, earlier: Subtas
  * for its verdict: close the task, or name what still has to be done. On the
  * last allowed round only closing is offered.
  */
-export function buildReviewPrompt(task: string, reports: SubtaskReport[], canContinue: boolean): string {
+export function buildReviewPrompt(
+  task: string,
+  reports: SubtaskReport[],
+  canContinue: boolean,
+  textOnlyRoles: Array<'hands' | 'routine'> = [],
+): string {
   return [
     'The subtasks you planned have finished. Their reports:',
     '',
@@ -113,7 +154,8 @@ export function buildReviewPrompt(task: string, reports: SubtaskReport[], canCon
     canContinue
       ? 'Check the reports against the task (look at the project folder yourself if you need to). If the task is complete, close it. If something is missing, wrong or failed, plan the follow-up subtasks — only what is still needed.'
       : 'Check the reports against the task (look at the project folder yourself if you need to) and close it: no further subtasks can be started, so say plainly what was achieved and what is still open.',
-    ...(canContinue ? ROLE_AND_ACCESS_RULES : []),
+    'A report in which the backend says it was blocked, lacked access or could not do the work is a failed subtask, whatever its status line says — never describe such work as done.',
+    ...(canContinue ? [...ROLE_AND_ACCESS_RULES, ...buildTextOnlyRule(textOnlyRoles)] : []),
     '',
     'Respond with ONLY a single fenced JSON code block and nothing else, in one of these shapes:',
     '```json',
@@ -123,17 +165,46 @@ export function buildReviewPrompt(task: string, reports: SubtaskReport[], canCon
   ].join('\n');
 }
 
+/**
+ * Reads the JSON object out of an orchestrator reply. The reply is asked to
+ * be one fenced block, but a subtask description may itself contain code
+ * fences (a file's content to write, say), so the first closing fence is
+ * not necessarily the end of the JSON. Each reading is tried in turn: up to
+ * the first closing fence, up to the last one, and from the first `{` to the
+ * last `}` of the whole reply.
+ */
 function parseJsonReply(responseText: string): unknown {
-  const fencedMatch = responseText.match(/```json\s*([\s\S]*?)```/i);
-  const jsonText = fencedMatch ? fencedMatch[1] : responseText.trim();
-  try {
-    return JSON.parse(jsonText);
-  } catch {
-    throw new AppError(
-      `The orchestrator's response was not valid JSON. Raw response:\n\n${responseText}`,
-      { code: 'ORCHESTRATOR_PLAN_PARSE_FAILED', statusCode: 502 },
-    );
+  const candidates: string[] = [];
+  const opening = responseText.search(/```json/i);
+  if (opening >= 0) {
+    const afterOpening = responseText.slice(opening).replace(/^```json\s*/i, '');
+    const firstClose = afterOpening.indexOf('```');
+    const lastClose = afterOpening.lastIndexOf('```');
+    if (firstClose >= 0) {
+      candidates.push(afterOpening.slice(0, firstClose));
+    }
+    if (lastClose > firstClose) {
+      candidates.push(afterOpening.slice(0, lastClose));
+    }
   }
+  const firstBrace = responseText.indexOf('{');
+  const lastBrace = responseText.lastIndexOf('}');
+  if (firstBrace >= 0 && lastBrace > firstBrace) {
+    candidates.push(responseText.slice(firstBrace, lastBrace + 1));
+  }
+  candidates.push(responseText.trim());
+
+  for (const candidate of candidates) {
+    try {
+      return JSON.parse(candidate);
+    } catch {
+      // Try the next reading.
+    }
+  }
+  throw new AppError(
+    `The orchestrator's response was not valid JSON. Raw response:\n\n${responseText}`,
+    { code: 'ORCHESTRATOR_PLAN_PARSE_FAILED', statusCode: 502 },
+  );
 }
 
 function readSubtasks(subtasksRaw: unknown, responseText: string): OrchestratorSubtask[] {
@@ -252,11 +323,14 @@ export function buildSubtaskTurnOptions(provider: LLMProvider, access: Orchestra
 }
 
 /**
- * Finds the first provider the user has assigned `role` to, in
- * `PROVIDER_RESOLUTION_ORDER`. Returns `null` when no provider holds that
- * role — the caller reports that subtask as skipped rather than guessing at
- * a substitute, since a user who assigned no "routine" provider, say, has
- * not opted into one existing by default.
+ * Picks the backend a subtask goes to. First choice is a backend the user
+ * gave the subtask's own role, in `PROVIDER_RESOLUTION_ORDER`. When nobody
+ * holds that role the work is not dropped: a `routine` subtask goes to a
+ * `hands` backend, and failing that — or for a `hands` subtask with no
+ * `hands` backend — to the orchestrator's own backend, in a fresh session.
+ * A user with one subscription and one API key (Claude as orchestrator, a
+ * free model for routine) still gets every subtask done this way. Returns
+ * `null` only when no backend has any of these roles.
  */
 export function resolveSubtaskProvider(
   role: ProviderRole,
@@ -264,7 +338,14 @@ export function resolveSubtaskProvider(
   /** Lets the caller pass over a backend that cannot take work right now (at its usage limit). */
   isAvailable: (provider: LLMProvider) => boolean = () => true,
 ): LLMProvider | null {
-  const holders = PROVIDER_RESOLUTION_ORDER.filter((provider) => providerRoles[provider] === role);
-  // A holder at its limit is still better than none: its session then hands off like any other.
-  return holders.find(isAvailable) ?? holders[0] ?? null;
+  const fallbackRoles: ProviderRole[] = role === 'routine' ? ['routine', 'hands', 'orchestrator'] : [role, 'orchestrator'];
+  for (const candidateRole of [...new Set(fallbackRoles)]) {
+    const holders = PROVIDER_RESOLUTION_ORDER.filter((provider) => providerRoles[provider] === candidateRole);
+    // A holder at its limit is still better than none: its session then hands off like any other.
+    const chosen = holders.find(isAvailable) ?? holders[0];
+    if (chosen) {
+      return chosen;
+    }
+  }
+  return null;
 }

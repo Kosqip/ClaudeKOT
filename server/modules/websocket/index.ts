@@ -9,5 +9,5 @@ export { broadcastSessionUpserted, broadcastSessionUpsertedBatch } from './servi
 // modules to start a turn without holding their HTTP request open until it ends.
 // runDetachedChatTurn: used by the scheduled-messages module to run a turn
 // from a timer, with no socket to stream to or report errors on.
-export { runDetachedChatTurn, startDetachedChatTurn } from './services/chat-websocket.service.js';
+export { runDetachedChatTurn, setDefaultChatRunHooks, startDetachedChatTurn } from './services/chat-websocket.service.js';
 export type { ProviderRuntimeGateway } from './services/chat-websocket.service.js';
