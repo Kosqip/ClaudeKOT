@@ -1942,3 +1942,49 @@ export type OrchestratorSubtaskResult = {
   started: boolean;
   error?: string;
 };
+
+// ---------------------------
+//----------------- TASK ROUTER TYPES ------------
+/**
+ * The four task tags from the original spec — a fixed set, not an open
+ * string, because each one maps to exactly one routing rule in
+ * `task-router-dispatch.service.ts`: `routine` → a free OpenRouter model,
+ * `coding` → Claude, `second_opinion` → Claude and Codex together (via the
+ * mix module), `complex` → no auto-dispatch at all, by design (the original
+ * spec calls this one out as requiring an explicit manual choice).
+ */
+export type TaskTag = 'routine' | 'coding' | 'second_opinion' | 'complex';
+
+/**
+ * The task-router config file's shape: one keyword/phrase list per tag,
+ * used for case-insensitive substring matching when the caller does not
+ * pass an explicit tag. See `task-router.config.json` at the repo root —
+ * read fresh on every classification call (not cached), so editing it only
+ * needs a server restart, never a rebuild.
+ */
+export type TaskRouterConfig = Record<TaskTag, string[]>;
+
+/**
+ * One session a task-router dispatch started, in the same `started`/`error`
+ * shape `MixDispatchResult`/`OrchestratorSubtaskResult` already use — the
+ * actual reply streams through that session's own `chat.subscribe` channel.
+ */
+export type TaskRouterSessionResult = {
+  provider: LLMProvider;
+  sessionId: string;
+  started: boolean;
+  error?: string;
+};
+
+/**
+ * Result of one task-router dispatch call. `complex` never produces
+ * `sessions` — `manualSelectionRequired` is the caller's signal to prompt
+ * the user for a backend instead of treating an empty list as a failure.
+ */
+export type TaskRouterDispatchResult = {
+  tag: TaskTag;
+  /** False when the caller passed an explicit tag; true when a keyword match (or no match) decided it. */
+  autoDetected: boolean;
+  manualSelectionRequired: boolean;
+  sessions: TaskRouterSessionResult[];
+};

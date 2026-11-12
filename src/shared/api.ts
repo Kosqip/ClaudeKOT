@@ -316,6 +316,11 @@ export const api = {
     plan: (body: { sessionId: string; task: string }) => post('/api/orchestrator/plan', body),
   },
 
+  taskRouter: {
+    dispatch: (body: { projectPath: string; content: string; explicitTag?: string }) =>
+      post('/api/task-router/dispatch', body),
+  },
+
   // Workspace file tree
   readFile: (projectId: string, filePath: string) =>
     get(`/api/file-tree/projects/${projectId}/file${query({ filePath })}`),
