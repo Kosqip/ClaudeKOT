@@ -179,6 +179,16 @@ const getSavedLanguage = (): string => {
   if (saved && languages.some(lang => lang.value === saved)) {
     return saved;
   }
+  // Nothing chosen yet (first visit, sign-in screen): follow the browser, so
+  // the app does not greet a Russian-speaking user in English.
+  const browserLanguages = typeof navigator === 'undefined' ? [] : navigator.languages ?? [navigator.language];
+  for (const browserLanguage of browserLanguages) {
+    const match = languages.find((lang) =>
+      lang.value === browserLanguage || lang.value.split('-')[0] === browserLanguage?.split('-')[0]);
+    if (match) {
+      return match.value;
+    }
+  }
   return 'en';
 };
 

@@ -1,55 +1,57 @@
 <div align="center">
- <img src="public/logo.svg" alt="ClaudeKOT" width="64" height="64">
+ <img src="public/logo.svg" alt="ClaudeKOT" width="96" height="96">
  <h1>ClaudeKOT</h1>
- <p>Один веб-интерфейс для нескольких ИИ-агентов, которые работают над одним проектом и подменяют друг друга:<br><b>Claude Code · Codex · Cursor · OpenCode · любой API-сервис (OpenRouter, Anthropic, OpenAI)</b></p>
+ <p>One web interface for several AI coding agents that work on the same project and take over from each other:<br><b>Claude Code · Codex · Cursor · OpenCode · any API service (OpenRouter, Anthropic, OpenAI)</b></p>
 </div>
 
-> Личный проект. Сделан на основе открытого [siteboon/claudecodeui](https://github.com/siteboon/claudecodeui) (CloudCLI) — всё, что умеет оригинал (чат, терминал, файлы, git, плагины), здесь сохранено. Ниже описано только то, что добавлено.
+<div align="right"><i><b>English</b> · <a href="docs/README.ru.md">Русский</a></i></div>
+
+> A personal project, built on the open-source [siteboon/claudecodeui](https://github.com/siteboon/claudecodeui) (CloudCLI). Everything the original does (chat, terminal, files, git, plugins) is still here. This page covers only what was added.
 
 ---
 
-## Зачем это
+## Why
 
-У каждого агента свои сильные стороны и свои лимиты. ClaudeKOT позволяет держать их в одном проекте и не думать, кто сейчас «в строю»:
+Every agent has its own strengths and its own limits. ClaudeKOT keeps them in one project so you do not have to think about which one is available right now:
 
-- **Закончился лимит — работа продолжается.** Claude упёрся в лимит подписки — разговор со всей историей сам переезжает на следующий бэкенд (например, Codex), и тот продолжает с того же места.
-- **Предупреждение заранее.** Когда лимит Claude или Codex израсходован на 80–95% (порог выбираете сами), после очередного ответа появляется предложение перенести разговор одной кнопкой.
-- **Задача — нужному исполнителю.** Рутина уходит в бесплатную модель, код — в Claude Code, «второе мнение» — одновременно в Claude и Codex.
-- **Один план — несколько исполнителей.** Главный агент разбивает задачу на подзадачи, и каждая уходит бэкенду с подходящей ролью.
+- **A limit runs out, the work goes on.** When Claude hits its subscription limit, the conversation moves — with its full history — to the next backend (Codex, for example), which picks up where Claude stopped.
+- **A warning ahead of time.** Once Claude or Codex has used 80–95% of its limit (you choose the threshold), the chat offers to move the conversation with one click after the current reply.
+- **The right agent for the task.** Routine work goes to a free model, code to Claude Code, a "second opinion" to Claude and Codex at once.
+- **One plan, several workers.** A lead agent splits a task into subtasks and each goes to the backend with the matching role.
 
 <div align="center">
-<img src="public/screenshots/claudekot-handoff.png" alt="Предложение перенести разговор на другой бэкенд" width="820">
-<br><em>Claude израсходовал 91% лимита — предложение продолжить на Codex</em>
+<img src="public/screenshots/claudekot-handoff.png" alt="Offer to move the conversation to another backend" width="820">
+<br><em>Claude has used 91% of its limit — an offer to continue on Codex (interface shown in Russian; English is built in)</em>
 <br><br>
-<img src="public/screenshots/claudekot-router.png" alt="Отправка задачи по типу" width="820">
-<br><em>Отправка задачи по типу: рутина, код, второе мнение</em>
+<img src="public/screenshots/claudekot-router.png" alt="Sending a task by type" width="820">
+<br><em>Sending a task by type: routine, code, second opinion</em>
 </div>
 
-## Что добавлено к оригиналу
+## What is added to the original
 
-| Возможность | Что делает |
+| Feature | What it does |
 |---|---|
-| **Custom API** — новый бэкенд | Чат с любой моделью по API-ключу: OpenRouter, Anthropic, OpenAI. Сервис выбирается вместе с моделью. |
-| **Эстафета при лимите** | Автоматический перенос разговора на запасной бэкенд, когда текущий отказал из-за лимита. Порядок запасных настраивается. |
-| **Предложение переноса по порогу** | Индикатор расхода лимита в чате и кнопка «Продолжить на …» при достижении порога (80/85/90/95% или выключено). |
-| **В несколько сессий** | Одно сообщение — сразу в несколько сессий разных бэкендов. |
-| **По типу задачи** | Маршрутизация по простым правилам из `task-router.config.json` (ключевые слова правятся руками, без ИИ-классификатора). |
-| **Разбить на подзадачи** | Бэкенд с ролью «оркестратор» составляет план, подзадачи открываются отдельными сессиями у «рук» и «рутины». |
-| **Роли бэкендов** | В настройках: кто главный, кто исполнитель, кто для рутины. |
-| **Skills для всех** | Один набор skills виден и Claude, и Codex. |
-| **Русский интерфейс** | Все новые элементы переведены. |
+| **Custom API** — a new backend | Chat with any model by API key: OpenRouter, Anthropic, OpenAI. The service is chosen together with the model; OpenRouter's free models are read from its current list. |
+| **Handoff on a limit** | The conversation moves to a fallback backend on its own when the current one refuses a request over a limit. The fallback order is configurable. |
+| **Offer at a threshold** | A usage indicator in the chat and a "Continue on …" button once the threshold is reached (80/85/90/95%, or off). Works for Claude and Codex. |
+| **Several sessions at once** | One message sent to several sessions on different backends. |
+| **By task type** | Routing by plain rules from `task-router.config.json` (keywords you edit by hand, no AI classifier). |
+| **Split into subtasks** | The backend with the "orchestrator" role drafts a plan; subtasks open as separate sessions on the "hands" and "routine" backends. |
+| **Backend roles** | In settings: who leads, who executes, who takes routine work. |
+| **Shared skills** | One set of skills visible to both Claude and Codex. |
+| **Russian interface** | Every new element is translated; the app follows your browser language. |
 
-### Что принципиально не тронуто
+### What is deliberately left alone
 
-- Авторизация и хранение токенов Claude Code и Codex (`~/.claude`, `~/.codex`) — как в оригинале.
-- Запуск CLI как подпроцессов — как в оригинале.
-- **Нет общего API-слоя поверх подписок.** Каждый бэкенд обращается только к своему провайдеру, своими учётными данными. Ключи Custom API — отдельные переменные окружения и с подписками никак не связаны.
+- Sign-in and token storage for Claude Code and Codex (`~/.claude`, `~/.codex`) — as in the original.
+- Running the CLIs as subprocesses — as in the original.
+- **No shared API layer on top of subscriptions.** Each backend talks only to its own provider with its own credentials. Custom API keys are separate environment variables and have nothing to do with the subscriptions.
 
-## Запуск на своём компьютере (Windows, без VPS)
+## Running it on your own computer
 
-Нужны: [Node.js 22+](https://nodejs.org/) и [Git](https://git-scm.com/download/win). Агенты, которыми хотите пользоваться (Claude Code, Codex), должны быть установлены и авторизованы как обычно.
+You need [Node.js 22+](https://nodejs.org/) and [Git](https://git-scm.com/downloads). The agents you want to use (Claude Code, Codex) must be installed and signed in as usual.
 
-Откройте PowerShell и выполните по очереди:
+In a terminal (PowerShell on Windows), run one after another:
 
 ```bash
 git clone https://github.com/Kosqip/ClaudeKOT.git
@@ -67,13 +69,13 @@ npm install
 npm start
 ```
 
-Первая сборка занимает пару минут. Когда в окне появится адрес, откройте в браузере **http://localhost:3001**, создайте локальную учётную запись (она хранится только на вашем компьютере) и выберите папку проекта.
+The first build takes a couple of minutes. When the address appears, open **http://localhost:3001** in a browser, create a local account (it is stored only on your machine) and pick a project folder.
 
-Чтобы остановить — `Ctrl+C` в окне PowerShell. Чтобы обновиться — `git pull`, затем снова `npm install` и `npm start`.
+Stop with `Ctrl+C`. To update: `git pull`, then `npm install` and `npm start` again.
 
-### Ключи для Custom API (необязательно)
+### Keys for Custom API (optional)
 
-Скопируйте `.env.example` в `.env` и впишите ключи тех сервисов, которыми пользуетесь:
+Copy `.env.example` to `.env` and fill in the keys for the services you use:
 
 ```
 OPENROUTER_API_KEY=sk-or-...
@@ -81,20 +83,20 @@ ANTHROPIC_DIRECT_API_KEY=sk-ant-...
 OPENAI_DIRECT_API_KEY=sk-...
 ```
 
-После изменения `.env` перезапустите `npm start`.
+Restart `npm start` after changing `.env`.
 
-### Где что настраивается
+### Where things are configured
 
-- **Настройки → Агенты**: порог предложения переноса, порядок запасных бэкендов, роли бэкендов, skills.
-- **Под полем ввода в чате**: кнопки «В несколько сессий», «По типу задачи», «Разбить на подзадачи».
-- **`task-router.config.json`** в корне: ключевые слова для маршрутизации по типу задачи.
+- **Settings → Agents**: handoff threshold, fallback order, backend roles, skills.
+- **Below the chat input**: "Several sessions", "By task type", "Split into subtasks".
+- **`task-router.config.json`** in the repository root: keywords for routing by task type.
 
-## Состояние проекта
+## Status
 
-Всё перечисленное реализовано и покрыто автотестами (более 2200 проверок). Вживую с настоящими подписками и ключами проверено ещё не всё — подробный список решений, найденных ошибок и того, что осталось проверить, ведётся в [docs/PROJECT_REQUIREMENTS.md](docs/PROJECT_REQUIREMENTS.md).
+Everything listed is implemented and covered by automated tests (over 2,200 checks). Not all of it has been exercised against real subscriptions and keys yet; the list of decisions, defects found and what is still to verify is kept in [docs/PROJECT_REQUIREMENTS.md](docs/PROJECT_REQUIREMENTS.md) (in Russian).
 
-## Лицензия и благодарности
+## License and credits
 
-[GNU AGPL v3.0 или новее](LICENSE), как и у оригинала.
+[GNU AGPL v3.0 or later](LICENSE), same as the original.
 
-Основа — [CloudCLI / claudecodeui](https://github.com/siteboon/claudecodeui) от Siteboon. Идеи по распознаванию лимитов и передаче работы между агентами подсмотрены у [razzant/claudexor](https://github.com/razzant/claudexor) (код не копировался).
+Built on [CloudCLI / claudecodeui](https://github.com/siteboon/claudecodeui) by Siteboon. Ideas on limit detection and handing work between agents were borrowed from [razzant/claudexor](https://github.com/razzant/claudexor) (no code copied).
