@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import type { Dispatch, MutableRefObject, SetStateAction } from 'react';
 
-import type { ServerEvent,MarkSessionIdle,MarkSessionProcessing,PendingPermissionRequest,ProjectSession,LLMProvider,NormalizedMessage,GetSessionActivity,MarkSessionBackground,SideQuestionEvent,SteerOutcome } from '@/shared/types';
+import type { ServerEvent,MarkSessionIdle,MarkSessionProcessing,PendingPermissionRequest,ProjectSession,LLMProvider,NormalizedMessage,GetSessionActivity,MarkSessionBackground,SideQuestionEvent,SteerOutcome,RateLimitStatus } from '@/shared/types';
 import { showCompletionTitleIndicator } from '@/modules/chat/utils/pageTitleNotification';
 import { playChatCompletionSound, playNotificationSound } from '@/shared/utils';
 import type { SessionStore } from '@/modules/chat/hooks/useSessionStore';
@@ -51,6 +51,13 @@ type UseChatRealtimeHandlersArgs = {
    * for every live user message, steered or not — `delivered` with its id.
    */
   onSteerOutcome?: (sessionId: string, messageId: string, outcome: SteerOutcome) => void;
+  /**
+   * Claude's own live rate-limit utilization for one session, pushed
+   * whenever claude.ai's usage changes (see `rate_limit_status` on
+   * `NormalizedMessage`). Not a transcript row — ChatInterface keeps the
+   * latest one per session and renders it as a small usage indicator.
+   */
+  onRateLimitStatus?: (sessionId: string, status: RateLimitStatus) => void;
 };
 
 /* ------------------------------------------------------------------ */
@@ -87,6 +94,7 @@ export function useChatRealtimeHandlers({
   requestLatestMessages,
   sessionStore,
   onSteerOutcome,
+  onRateLimitStatus,
 }: UseChatRealtimeHandlersArgs) {
   // Session switches can send `chat.subscribe` before this effect has a chance
   // to rebind the websocket listener. Read the visible session id from a ref
@@ -173,6 +181,15 @@ export function useChatRealtimeHandlers({
             if (hasPendingActionablePermissionRequests && !hadActionablePermissionRequests) {
               void playNotificationSound();
             }
+          }
+          return;
+        }
+
+        case 'rate_limit_status': {
+          // A usage-level push, not a turn event or a transcript row — does
+          // not touch processing state, pending permissions, or the store.
+          if (sid && msg.rateLimitStatus) {
+            onRateLimitStatus?.(sid, msg.rateLimitStatus as RateLimitStatus);
           }
           return;
         }
@@ -492,5 +509,6 @@ export function useChatRealtimeHandlers({
     requestLatestMessages,
     sessionStore,
     onSteerOutcome,
+    onRateLimitStatus,
   ]);
 }

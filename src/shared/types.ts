@@ -748,7 +748,22 @@ type MessageKind =
   | 'session_created'
   | 'history_truncated'
   | 'task_notification'
-  | 'task_status';
+  | 'task_status'
+  | 'rate_limit_status';
+
+/**
+ * Claude's own live rate-limit utilization, carried on a `rate_limit_status`
+ * `NormalizedMessage`. Mirrors the server's identically-named type
+ * (`server/shared/types.ts`) — kept in sync by hand, same as the other
+ * duplicated protocol shapes in this file.
+ */
+export type RateLimitStatus = {
+  status: 'allowed' | 'allowed_warning' | 'rejected';
+  rateLimitType?: string;
+  /** Fraction of the window used, 0–1, when the SDK reports one. */
+  utilization?: number;
+  resetsAt?: string;
+};
 
 // ---------------------------
 

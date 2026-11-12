@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ArrowDownIcon } from 'lucide-react';
 
@@ -9,11 +9,13 @@ import PermissionContext from '@/modules/chat/context/PermissionContext';
 import { MarkdownWorkspaceContext } from '@/modules/chat/context/MarkdownWorkspaceContext';
 import { TranscriptSessionContext } from '@/modules/chat/context/TranscriptSessionContext';
 import { api } from '@/shared/api';
+import { cn } from '@/shared/utils';
 import type {
   ChatMessage,
   LLMProvider,
   Project,
   ProjectSession,
+  RateLimitStatus,
   SessionEstablishedContext,
   SessionNavigationOptions,
 } from '@/shared/types';
@@ -93,6 +95,13 @@ function ChatInterface({
   // When each session's `chat.subscribe` was last sent; idle acks older than
   // a later local request are discarded as stale.
   const statusCheckSentAtRef = useRef(new Map<string, number>());
+  // Keyed by app session id — the whole map, not just the viewed session's
+  // entry, so switching sessions shows that session's own last-known reading
+  // instead of carrying over whatever was last seen in another tab.
+  const [rateLimitStatusBySession, setRateLimitStatusBySession] = useState<Record<string, RateLimitStatus>>({});
+  const handleRateLimitStatus = useCallback((sessionId: string, status: RateLimitStatus) => {
+    setRateLimitStatusBySession((previous) => ({ ...previous, [sessionId]: status }));
+  }, []);
   // Highest live `seq` observed per session. Written by the realtime handler
   // on every sequenced frame, read whenever a `chat.subscribe` is sent so the
   // server replays only the events this client actually missed.
@@ -315,7 +324,10 @@ function ChatInterface({
     requestLatestMessages,
     sessionStore,
     onSteerOutcome: handleSteerOutcome,
+    onRateLimitStatus: handleRateLimitStatus,
   });
+
+  const currentRateLimitStatus = currentSessionId ? rateLimitStatusBySession[currentSessionId] : undefined;
 
   // Lets other modules (the quick settings Commands tab) hand text to the
   // composer: append it after a separating space, then focus the textarea with
@@ -628,6 +640,30 @@ function ChatInterface({
           supportsSideQuestions={supportsSideQuestions}
         />
         </div>
+
+        {currentRateLimitStatus && typeof currentRateLimitStatus.utilization === 'number' ? (
+          <div className="flex items-center gap-2 px-4 pb-2 text-xs text-muted-foreground">
+            <div className="h-1.5 w-24 overflow-hidden rounded-full bg-muted">
+              <div
+                className={cn(
+                  'h-full rounded-full transition-[width]',
+                  currentRateLimitStatus.status === 'rejected'
+                    ? 'bg-red-500'
+                    : currentRateLimitStatus.status === 'allowed_warning'
+                      ? 'bg-amber-500'
+                      : 'bg-emerald-500',
+                )}
+                style={{ width: `${Math.min(100, Math.round(currentRateLimitStatus.utilization * 100))}%` }}
+              />
+            </div>
+            <span>
+              {t('input.rateLimitUsage', {
+                defaultValue: 'Claude usage: {{percent}}%',
+                percent: Math.round(currentRateLimitStatus.utilization * 100),
+              })}
+            </span>
+          </div>
+        ) : null}
 
         {selectedProject?.sessions && selectedProject.sessions.length >= 2 ? (
           <div className="px-4 pb-3">
