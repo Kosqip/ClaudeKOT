@@ -49,12 +49,14 @@ export type UserPreferences = {
    */
   handoffFallbackOrder: LLMProvider[];
   /**
-   * A role the user has assigned one provider, purely as data today: no
-   * orchestration logic reads this yet. Intended as the configuration input
-   * for a future task-splitting orchestrator (not yet built) — 'orchestrator'
-   * for the backend that plans/delegates, 'hands' for one that executes
-   * delegated work, 'routine' for a cheap default for low-stakes tasks. A
-   * provider absent from this record has no assigned role.
+   * A role the user has assigned one provider. Read server-side by
+   * `server/modules/orchestrator/orchestrator.routes.ts` (via
+   * `userPreferencesDb`, not through this module) to gate and resolve a
+   * manual "split into subtasks" action: 'orchestrator' is the backend that
+   * plans/delegates, 'hands' executes delegated work, 'routine' is a cheap
+   * default for low-stakes subtasks. A provider absent from this record has
+   * no assigned role. Delegation is one level only today — a subtask is
+   * never itself split further.
    */
   providerRoles: Partial<Record<LLMProvider, 'orchestrator' | 'hands' | 'routine'>>;
 };

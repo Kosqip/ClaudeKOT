@@ -11,6 +11,7 @@ import { TranscriptSessionContext } from '@/modules/chat/context/TranscriptSessi
 import { api } from '@/shared/api';
 import type {
   ChatMessage,
+  LLMProvider,
   Project,
   ProjectSession,
   SessionEstablishedContext,
@@ -30,6 +31,8 @@ import ChatMessagesPane from '@/modules/chat/transcript/ChatMessagesPane';
 import ChatComposer from '@/modules/chat/composer/ChatComposer';
 import CommandResultModal from '@/modules/chat/modals/CommandResultModal';
 import { MixSendPanel } from '@/modules/mix';
+import { OrchestratorPlanPanel } from '@/modules/orchestrator';
+import { readUserPreference } from '@/shared/userSettings';
 
 type ChatInterfaceProps = {
   isActive: boolean;
@@ -630,6 +633,16 @@ function ChatInterface({
             <MixSendPanel candidates={selectedProject.sessions} />
           </div>
         ) : null}
+
+        {(currentSessionId || selectedSession?.id)
+          && readUserPreference('providerRoles', {} as Partial<Record<LLMProvider, string>>)[provider] === 'orchestrator' ? (
+            <div className="px-4 pb-3">
+              <OrchestratorPlanPanel
+                sessionId={currentSessionId || selectedSession!.id}
+                onOpenSubtaskSession={(subtaskSessionId) => onNavigateToSession?.(subtaskSessionId)}
+              />
+            </div>
+          ) : null}
       </div>
 
       <CommandResultModal
