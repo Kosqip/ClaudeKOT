@@ -89,13 +89,36 @@ const GITHUB_TOKEN_CREDENTIAL_SCOPE = 'credential.https://github.com.helper';
  * the one the user selected; the helper itself is scoped to github.com over
  * https, so a clone from any other host gets no credential at all.
  */
+/**
+ * Strips any `GIT_CONFIG_*`/`CLOUDCLI_GITHUB_TOKEN` this process already
+ * inherited from its own host environment (a sandboxed dev container's own
+ * git proxy setup is one real example) before building the clone's
+ * environment from scratch. Without this, a host that happens to export its
+ * own `GIT_CONFIG_COUNT`-style override would leak straight into the clone
+ * — defeating "no token was given" and letting an unrelated, ambient
+ * credential.helper answer for the clone instead of git's own normal
+ * handling.
+ */
+function withoutInheritedGitConfigOverrides(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const cleaned: NodeJS.ProcessEnv = {};
+  for (const [key, value] of Object.entries(env)) {
+    if (key === 'CLOUDCLI_GITHUB_TOKEN' || /^GIT_CONFIG_(COUNT|KEY_\d+|VALUE_\d+)$/.test(key)) {
+      continue;
+    }
+    cleaned[key] = value;
+  }
+  return cleaned;
+}
+
 function buildGitCloneEnvironment(githubToken: string | null): NodeJS.ProcessEnv {
+  const baseEnv = withoutInheritedGitConfigOverrides(process.env);
+
   if (!githubToken) {
-    return { ...process.env, GIT_TERMINAL_PROMPT: '0' };
+    return { ...baseEnv, GIT_TERMINAL_PROMPT: '0' };
   }
 
   return {
-    ...process.env,
+    ...baseEnv,
     GIT_CONFIG_COUNT: '2',
     GIT_CONFIG_KEY_0: 'credential.helper',
     GIT_CONFIG_VALUE_0: '',
