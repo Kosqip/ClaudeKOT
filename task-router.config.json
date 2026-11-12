@@ -9,7 +9,13 @@
     "rename",
     "простой",
     "мелкая правка",
-    "small fix"
+    "small fix",
+    "форматирование",
+    "format",
+    "обнови зависимост",
+    "update dependency",
+    "дополни тесты",
+    "add tests"
   ],
   "coding": [
     "код",
@@ -21,7 +27,13 @@
     "баг",
     "bug",
     "рефактор",
-    "refactor"
+    "refactor",
+    "добавь фичу",
+    "add feature",
+    "исправь ошибку",
+    "fix bug",
+    "напиши тест",
+    "write a test"
   ],
   "second_opinion": [
     "второе мнение",
@@ -31,7 +43,12 @@
     "какой вариант лучше",
     "which is better",
     "проверь решение",
-    "review this solution"
+    "review this solution",
+    "альтернативное мнение",
+    "alternative opinion",
+    "code review",
+    "обсуди подход",
+    "discuss the approach"
   ],
   "complex": [
     "сложное решение",
@@ -41,6 +58,12 @@
     "стратеги",
     "strategy",
     "критическое решение",
-    "critical decision"
+    "critical decision",
+    "миграция",
+    "migration",
+    "редизайн",
+    "redesign",
+    "большое изменение",
+    "major change"
   ]
 }
