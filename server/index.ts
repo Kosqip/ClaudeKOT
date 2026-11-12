@@ -16,9 +16,10 @@ import {
     detectProviderLimit,
     initializeSessionsWatcher,
     providerRuntimeService,
+    providerTokenUsageService,
     reapOrphanedOpenCodeServers,
 } from '@/modules/providers/index.js';
-import { chatRunRegistry, createWebSocketServer, onRunSettled } from '@/modules/websocket/index.js';
+import { broadcastToConnectedClients, chatRunRegistry, createWebSocketServer, onRunSettled } from '@/modules/websocket/index.js';
 import {
     DEFAULT_HANDOFF_THRESHOLD_PERCENT,
     handoffSessionOnLimit,
@@ -234,20 +235,19 @@ function handleRateLimitStatusForAutoHandoff(input: { provider: LLMProvider; ses
     });
 }
 
-onRunSettled((sessionId) => {
-    const pending = pendingHandoffSuggestions.get(sessionId);
-    if (!pending) {
-        return;
-    }
-    pendingHandoffSuggestions.delete(sessionId);
-    // `standby` is the once-per-session marker for the offer; a session
-    // already moved on a refusal (`continue`) is not offered anything.
-    if (!tryClaimHandoff(sessionId, 'standby')) {
+/**
+ * Offers the switch for a session whose turn is over, once per session
+ * (`standby` is the marker; a session already moved on a refusal is not
+ * offered anything). With no fallback ready the marker is given back, so a
+ * later turn can offer again.
+ */
+function offerHandoff(pending: PendingHandoffSuggestion): void {
+    if (!tryClaimHandoff(pending.sessionId, 'standby')) {
         return;
     }
     suggestHandoff(
         {
-            fromSessionId: sessionId,
+            fromSessionId: pending.sessionId,
             reason: pending.reason,
             utilizationPercent: pending.utilizationPercent,
             fallbackOrder: readStoredFallbackOrder(pending.userId),
@@ -256,15 +256,64 @@ onRunSettled((sessionId) => {
     )
         .then((suggestion) => {
             if (!suggestion) {
-                // Nothing to offer right now; a later turn may find a fallback ready.
-                releaseHandoffClaim(sessionId);
+                releaseHandoffClaim(pending.sessionId);
             }
         })
         .catch((error) => {
-            releaseHandoffClaim(sessionId);
-            console.error('[Handoff] Could not offer a switch', { sessionId, error });
+            releaseHandoffClaim(pending.sessionId);
+            console.error('[Handoff] Could not offer a switch', { sessionId: pending.sessionId, error });
         });
+}
+
+onRunSettled((sessionId) => {
+    const pending = pendingHandoffSuggestions.get(sessionId);
+    if (pending) {
+        pendingHandoffSuggestions.delete(sessionId);
+        offerHandoff(pending);
+    }
 });
+
+/**
+ * Codex does not push its plan usage the way Claude does: it writes the
+ * reading into the session's own file after each model call. When a Codex
+ * turn ends that reading is read back, shown to the user like Claude's, and
+ * checked against the same threshold — the turn is already over, so the
+ * offer to switch can be made at once.
+ */
+function handleRunCompletedForUsage(input: { provider: LLMProvider; sessionId: string; userId: string | number | null }): void {
+    if (input.provider !== 'codex') {
+        return;
+    }
+    void providerTokenUsageService.getCodexRateLimitStatus(input.sessionId).then((status) => {
+        if (!status) {
+            return;
+        }
+        broadcastToConnectedClients(JSON.stringify({
+            kind: 'rate_limit_status',
+            sessionId: input.sessionId,
+            provider: 'codex',
+            rateLimitStatus: status,
+        }));
+
+        const userId = readHandoffUserId(input.userId);
+        if (userId === null) {
+            return;
+        }
+        const storedThreshold = userPreferencesDb.getPreferences(userId).handoffThresholdPercent;
+        const decision = shouldHandoffForRateLimitStatus(
+            status,
+            typeof storedThreshold === 'number' ? storedThreshold : DEFAULT_HANDOFF_THRESHOLD_PERCENT,
+        );
+        if (decision.handoff) {
+            offerHandoff({
+                sessionId: input.sessionId,
+                userId,
+                reason: decision.reason,
+                utilizationPercent: typeof status.utilization === 'number' ? Math.round(status.utilization * 100) : undefined,
+            });
+        }
+    });
+}
 
 createWebSocketServer(server, {
     verifyClient: {
@@ -275,6 +324,7 @@ createWebSocketServer(server, {
         runtime: providerRuntimeService,
         onRunFailed: handleRunFailureForAutoHandoff,
         onRateLimitStatus: handleRateLimitStatusForAutoHandoff,
+        onRunCompleted: handleRunCompletedForUsage,
     },
     shell: {
         resolveProviderSessionId: (sessionId, provider) => {

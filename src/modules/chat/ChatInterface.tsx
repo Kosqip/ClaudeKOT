@@ -760,6 +760,7 @@ function ChatInterface({
             </div>
             <span>
               {t('input.rateLimitUsage', {
+                provider: LLM_PROVIDER_NAMES[currentRateLimitStatus.provider ?? 'claude'],
                 percent: Math.round(currentRateLimitStatus.utilization * 100),
               })}
             </span>

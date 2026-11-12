@@ -38,3 +38,8 @@ export {
   MAX_SIDE_QUESTIONS_PER_SESSION,
   sideQuestionsService,
 } from './services/side-questions.service.js';
+
+// providerTokenUsageService: besides serving token usage to this module's own
+// routes, server/index.ts reads Codex's plan-limit reading through it when a
+// Codex turn ends (getCodexRateLimitStatus).
+export { providerTokenUsageService } from '@/modules/providers/services/provider-token-usage.service.js';

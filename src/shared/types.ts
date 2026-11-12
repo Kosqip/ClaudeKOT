@@ -763,6 +763,8 @@ export type RateLimitStatus = {
   /** Fraction of the window used, 0–1, when the SDK reports one. */
   utilization?: number;
   resetsAt?: string;
+  /** Whose reading this is (Claude pushes it live, Codex's is read when a turn ends); added by the client from the message envelope. */
+  provider?: LLMProvider;
 };
 
 /**

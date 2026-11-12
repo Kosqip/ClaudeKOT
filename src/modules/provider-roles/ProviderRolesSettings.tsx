@@ -39,7 +39,7 @@ export default function ProviderRolesSettings() {
             <select
               value={roles[provider] ?? ''}
               onChange={(event) => handleChange(provider, event.target.value)}
-              className="rounded-md border border-input bg-background px-2 py-1 text-sm"
+              className="rounded-md border border-input bg-background py-1 pl-2 pr-8 text-sm"
             >
               {PROVIDER_ROLE_OPTIONS.map((option) => (
                 <option key={option} value={option}>

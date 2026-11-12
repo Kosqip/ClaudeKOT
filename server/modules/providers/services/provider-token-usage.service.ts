@@ -6,7 +6,7 @@ import path from 'node:path';
 import Database from 'better-sqlite3';
 
 import { sessionsDb } from '@/modules/database/index.js';
-import type { AnyRecord } from '@/shared/types.js';
+import type { AnyRecord, RateLimitStatus } from '@/shared/types.js';
 import { AppError, getOpenCodeDatabasePath } from '@/shared/utils.js';
 
 type SessionRow = NonNullable<ReturnType<typeof sessionsDb.getSessionById>>;
@@ -219,6 +219,69 @@ function findCodexTokenUsage(fileContent: string): TokenUsageResult | null {
   return null;
 }
 
+/** Share of a window used from which Codex's reading is reported as a warning — the lowest threshold the handoff setting offers. */
+const CODEX_WARNING_PERCENT = 80;
+
+/**
+ * Codex's own plan-limit reading from the newest `token_count` row in the
+ * given rollout JSONL text, or null when it has none. Codex records
+ * `payload.rate_limits.{primary,secondary}` there after each model call, each
+ * with `used_percent` (0–100), `window_minutes` and `resets_at` (epoch
+ * seconds); the fuller of the two windows is the one that will stop a
+ * session first, so that is the one returned. Never `rejected`: a refusal
+ * reaches the app as the turn's error, not through this file.
+ *
+ * Exported for this module's tests.
+ */
+export function findCodexRateLimitStatus(fileContent: string): RateLimitStatus | null {
+  const lines = fileContent.trim().split('\n');
+
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    try {
+      const entry = JSON.parse(lines[index]) as AnyRecord;
+      const rateLimits = entry.type === 'event_msg' && entry.payload?.type === 'token_count'
+        ? entry.payload.rate_limits as AnyRecord | null | undefined
+        : null;
+      if (!rateLimits || typeof rateLimits !== 'object') {
+        continue;
+      }
+
+      let fullest: AnyRecord | null = null;
+      for (const windowName of ['primary', 'secondary']) {
+        const window = rateLimits[windowName] as AnyRecord | null | undefined;
+        if (
+          window
+          && typeof window.used_percent === 'number'
+          && Number.isFinite(window.used_percent)
+          && (!fullest || window.used_percent > fullest.used_percent)
+        ) {
+          fullest = window;
+        }
+      }
+      if (!fullest) {
+        continue;
+      }
+
+      const usedPercent = Math.min(100, Math.max(0, fullest.used_percent as number));
+      const resetsAt = typeof fullest.resets_at === 'number' && Number.isFinite(fullest.resets_at)
+        ? new Date(fullest.resets_at * 1000).toISOString()
+        : typeof fullest.resets_at === 'string' ? fullest.resets_at : undefined;
+      return {
+        status: usedPercent >= CODEX_WARNING_PERCENT ? 'allowed_warning' : 'allowed',
+        rateLimitType: fullest.window_minutes === 300
+          ? 'five_hour'
+          : fullest.window_minutes === 10_080 ? 'seven_day' : undefined,
+        utilization: usedPercent / 100,
+        resetsAt,
+      };
+    } catch {
+      // A provider may be writing the last JSONL line while this read happens.
+    }
+  }
+
+  return null;
+}
+
 function emptyCodexTokenUsage(): TokenUsageResult {
   return {
     used: 0,
@@ -403,6 +466,37 @@ export function createProviderTokenUsageService(
   const dependencies = { ...defaultDependencies, ...dependencyOverrides };
 
   return {
+    /**
+     * Codex's latest plan-limit reading for one app session, read from the
+     * tail of that session's rollout file; null for any other provider, a
+     * session with no rollout yet, or a rollout that carries no reading
+     * (API-key sign-ins have no plan window). Never throws — this is a
+     * best-effort extra, not something a turn may fail on. Used by
+     * `server/index.ts` when a Codex turn ends.
+     */
+    async getCodexRateLimitStatus(sessionId: string): Promise<RateLimitStatus | null> {
+      try {
+        const session = dependencies.getSessionById(sessionId);
+        if (!session || session.provider !== 'codex') {
+          return null;
+        }
+        const sessionFilePath = session.jsonl_path && dependencies.fileExists(session.jsonl_path)
+          ? session.jsonl_path
+          : await findCodexSessionFile(
+            path.join(dependencies.getHomeDirectory(), '.codex', 'sessions'),
+            session.provider_session_id || sessionId,
+            dependencies,
+          );
+        if (!sessionFilePath) {
+          return null;
+        }
+        const tail = await dependencies.readTextFileTail(sessionFilePath, TOKEN_USAGE_TAIL_BYTES);
+        return findCodexRateLimitStatus(tail.content);
+      } catch {
+        return null;
+      }
+    },
+
     /**
      * Resolves all provider-specific storage details from one app-facing
      * session id, then returns the latest usage snapshot for that provider.

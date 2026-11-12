@@ -514,7 +514,7 @@
     "error": "Error: {{error}}",
     "handoffThreshold": {
       "title": "Automatic backend handoff",
-      "description": "When Claude’s own usage reaches this level, you are offered a one-click move to a fallback backend once the current reply ends. If Claude refuses a request, the conversation always moves on its own.",
+      "description": "When a backend’s own plan usage (Claude, Codex) reaches this level, you are offered a one-click move to a fallback backend once the current reply ends. If a backend refuses a request, the conversation always moves on its own.",
       "onlyFullLimit": "Never offer, only move on refusal",
       "atPercent": "At {{percent}}%"
     },

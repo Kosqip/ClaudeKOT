@@ -195,7 +195,10 @@ export function useChatRealtimeHandlers({
           // A usage-level push, not a turn event or a transcript row — does
           // not touch processing state, pending permissions, or the store.
           if (sid && msg.rateLimitStatus) {
-            onRateLimitStatus?.(sid, msg.rateLimitStatus as RateLimitStatus);
+            onRateLimitStatus?.(sid, {
+              ...(msg.rateLimitStatus as RateLimitStatus),
+              provider: typeof msg.provider === 'string' ? msg.provider as LLMProvider : undefined,
+            });
           }
           return;
         }

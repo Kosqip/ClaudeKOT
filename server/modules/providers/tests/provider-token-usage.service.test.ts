@@ -8,6 +8,7 @@ import Database from 'better-sqlite3';
 
 import {
   createProviderTokenUsageService,
+  findCodexRateLimitStatus,
   summarizeClaudeTokenUsage,
 } from '@/modules/providers/services/provider-token-usage.service.js';
 import { AppError } from '@/shared/utils.js';
@@ -369,5 +370,57 @@ test('Codex token usage falls back to the whole file when the tail has no token_
     assert.equal(usage.used, 6);
   } finally {
     await rm(tempDirectory, { recursive: true, force: true });
+  }
+});
+
+function codexTokenCount(rateLimits: unknown): string {
+  return JSON.stringify({ type: 'event_msg', payload: { type: 'token_count', info: null, rate_limits: rateLimits } });
+}
+
+test('findCodexRateLimitStatus reports the fuller of Codex\'s two windows from the newest reading', () => {
+  const status = findCodexRateLimitStatus([
+    codexTokenCount({ primary: { used_percent: 10, window_minutes: 300 }, secondary: { used_percent: 5, window_minutes: 10080 } }),
+    JSON.stringify({ type: 'response_item', payload: {} }),
+    codexTokenCount({
+      primary: { used_percent: 42, window_minutes: 300, resets_at: 1_800_000_000 },
+      secondary: { used_percent: 91.4, window_minutes: 10080, resets_at: 1_800_100_000 },
+    }),
+  ].join('\n'));
+
+  assert.deepEqual(status, {
+    status: 'allowed_warning',
+    rateLimitType: 'seven_day',
+    utilization: 0.914,
+    resetsAt: new Date(1_800_100_000 * 1000).toISOString(),
+  });
+});
+
+test('findCodexRateLimitStatus is a plain reading below the warning level and null without one', () => {
+  const low = findCodexRateLimitStatus(codexTokenCount({ primary: { used_percent: 30, window_minutes: 300 } }));
+  assert.equal(low?.status, 'allowed');
+  assert.equal(low?.rateLimitType, 'five_hour');
+
+  // An API-key sign-in has no plan window: the row carries no reading at all.
+  assert.equal(findCodexRateLimitStatus(codexTokenCount(null)), null);
+  assert.equal(findCodexRateLimitStatus('not json'), null);
+});
+
+test('getCodexRateLimitStatus reads the session\'s rollout and never throws', async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'codex-limits-'));
+  try {
+    const rollout = path.join(directory, 'rollout.jsonl');
+    await writeFile(rollout, `${codexTokenCount({ primary: { used_percent: 88, window_minutes: 300 } })}\n`);
+
+    const service = createProviderTokenUsageService({
+      getSessionById: (sessionId: string) => (sessionId === 'codex-session'
+        ? createSessionRow({ session_id: 'codex-session', provider: 'codex', jsonl_path: rollout })
+        : sessionId === 'claude-session' ? createSessionRow() : null) as never,
+    });
+
+    assert.equal((await service.getCodexRateLimitStatus('codex-session'))?.utilization, 0.88);
+    assert.equal(await service.getCodexRateLimitStatus('claude-session'), null);
+    assert.equal(await service.getCodexRateLimitStatus('missing'), null);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
   }
 });

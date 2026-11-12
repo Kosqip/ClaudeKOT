@@ -196,7 +196,7 @@
       "attachments_one": "{{count}} file attached",
       "attachments_other": "{{count}} files attached"
     },
-    "rateLimitUsage": "Claude usage: {{percent}}%",
+    "rateLimitUsage": "{{provider}} usage: {{percent}}%",
     "handoffContinued": "{{from}} hit its usage limit — this conversation continues in a new {{to}} session.",
     "handoffStandby": "This conversation was moved to a new {{to}} session, which is waiting for your next instruction.",
     "handoffSuggest": "{{from}} is close to its usage limit. Move this conversation to {{to}}?",

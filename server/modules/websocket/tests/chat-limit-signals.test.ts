@@ -122,3 +122,26 @@ test('startDetachedChatTurn refuses a session that does not exist', async () => 
     assert.equal(dispatch.error, 'The session no longer exists.');
   });
 });
+
+test('a runtime\'s terminal complete message reaches onRunCompleted', async () => {
+  // Codex records its plan usage on disk only; the composition root reads it
+  // back when this fires.
+  await withSession('codex', async (sessionId) => {
+    const completed: unknown[] = [];
+
+    await runDetachedChatTurn(
+      { sessionId, userId: 1, content: 'hello' },
+      {
+        runtime: {
+          hasRuntime: () => true,
+          run: async (_provider: string, _command: string, _options: unknown, writer: Writer) => {
+            writer.send({ kind: 'complete', sessionId, provider: 'codex', exitCode: 0 });
+          },
+        } as never,
+        onRunCompleted: (input) => completed.push(input),
+      },
+    );
+
+    assert.deepEqual(completed, [{ provider: 'codex', sessionId, userId: 1 }]);
+  });
+});

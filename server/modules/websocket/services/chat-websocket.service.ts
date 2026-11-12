@@ -119,6 +119,13 @@ type ChatWebSocketDependencies = {
    * the handoff module (same cycle-avoidance reasoning as `onRunFailed`).
    */
   onRateLimitStatus?(input: { provider: LLMProvider; sessionId: string; userId: string | number | null; status: RateLimitStatus }): void;
+  /**
+   * Called when a runtime sends its terminal `complete` message. Lets the
+   * composition root read usage a provider only records on disk (Codex
+   * writes its plan-limit reading to the session file, it does not push it)
+   * once the turn that produced it is over.
+   */
+  onRunCompleted?(input: { provider: LLMProvider; sessionId: string; userId: string | number | null }): void;
 };
 
 /**
@@ -350,6 +357,8 @@ async function dispatchRun(
         });
       } else if (message?.kind === 'error' && typeof message.content === 'string' && message.content) {
         dependencies.onRunFailed?.({ provider, sessionId, userId, message: message.content });
+      } else if (message?.kind === 'complete') {
+        dependencies.onRunCompleted?.({ provider, sessionId, userId });
       }
     } catch (hookError) {
       console.error('[Chat] limit-signal hook threw', { sessionId, error: hookError });
