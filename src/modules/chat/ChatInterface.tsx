@@ -14,6 +14,7 @@ import { LLM_PROVIDER_NAMES } from '@/shared/constants';
 import type {
   ChatMessage,
   HandoffNotice,
+  HandoffSuggestion,
   LLMProvider,
   Project,
   ProjectSession,
@@ -35,6 +36,7 @@ import ChatMessagesPane from '@/modules/chat/transcript/ChatMessagesPane';
 import ChatComposer from '@/modules/chat/composer/ChatComposer';
 import BackendToolsBar from '@/modules/chat/composer/BackendToolsBar';
 import CommandResultModal from '@/modules/chat/modals/CommandResultModal';
+import { HandoffSuggestionBanner } from '@/modules/handoff';
 import { MixSendPanel } from '@/modules/mix';
 import { OrchestratorPlanPanel } from '@/modules/orchestrator';
 import { TaskRouterPanel } from '@/modules/task-router';
@@ -108,8 +110,18 @@ function ChatInterface({
   // The latest backend switch per original session, shown as a banner there
   // so an automatic handoff is never something the user has to discover.
   const [handoffNoticeBySession, setHandoffNoticeBySession] = useState<Record<string, HandoffNotice>>({});
+  // A pending offer to switch backends per session; null once dismissed.
+  const [handoffSuggestionBySession, setHandoffSuggestionBySession] = useState<Record<string, HandoffSuggestion | null>>({});
   const handleHandoffNotice = useCallback((notice: HandoffNotice) => {
     setHandoffNoticeBySession((previous) => ({ ...previous, [notice.sessionId]: notice }));
+    // The conversation has moved: an offer to move it is now out of date.
+    setHandoffSuggestionBySession((previous) => ({ ...previous, [notice.sessionId]: null }));
+  }, []);
+  const handleHandoffSuggestion = useCallback((suggestion: HandoffSuggestion) => {
+    setHandoffSuggestionBySession((previous) => ({ ...previous, [suggestion.sessionId]: suggestion }));
+  }, []);
+  const dismissHandoffSuggestion = useCallback((sessionId: string) => {
+    setHandoffSuggestionBySession((previous) => ({ ...previous, [sessionId]: null }));
   }, []);
   // Highest live `seq` observed per session. Written by the realtime handler
   // on every sequenced frame, read whenever a `chat.subscribe` is sent so the
@@ -335,11 +347,13 @@ function ChatInterface({
     onSteerOutcome: handleSteerOutcome,
     onRateLimitStatus: handleRateLimitStatus,
     onHandoffNotice: handleHandoffNotice,
+    onHandoffSuggestion: handleHandoffSuggestion,
   });
 
   const viewedSessionId = currentSessionId || selectedSession?.id || null;
   const currentRateLimitStatus = viewedSessionId ? rateLimitStatusBySession[viewedSessionId] : undefined;
   const currentHandoffNotice = viewedSessionId ? handoffNoticeBySession[viewedSessionId] : undefined;
+  const currentHandoffSuggestion = viewedSessionId ? handoffSuggestionBySession[viewedSessionId] : undefined;
 
   // The multi-backend tools offered under the composer. The orchestrator one
   // exists only in a session whose provider holds the orchestrator role.
@@ -691,6 +705,17 @@ function ChatInterface({
           supportsSideQuestions={supportsSideQuestions}
         />
         </div>
+
+        {currentHandoffSuggestion && !currentHandoffNotice && !isProcessing ? (
+          <HandoffSuggestionBanner
+            suggestion={currentHandoffSuggestion}
+            onSwitched={(toSessionId) => {
+              dismissHandoffSuggestion(currentHandoffSuggestion.sessionId);
+              onNavigateToSession?.(toSessionId);
+            }}
+            onDismiss={() => dismissHandoffSuggestion(currentHandoffSuggestion.sessionId)}
+          />
+        ) : null}
 
         {currentHandoffNotice ? (
           <div

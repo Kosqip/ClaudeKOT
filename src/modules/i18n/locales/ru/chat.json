@@ -158,7 +158,13 @@
     },
     "rateLimitUsage": "Лимит Claude: {{percent}}%",
     "handoffContinued": "{{from}} упёрся в лимит — разговор продолжается в новой сессии {{to}}.",
-    "handoffStandby": "{{from}} близок к лимиту — сессия {{to}} с этим разговором готова принять работу.",
+    "handoffStandby": "Разговор перенесён в новую сессию {{to}} — она ждёт вашего следующего указания.",
+    "handoffSuggest": "{{from}} близок к лимиту. Перенести разговор на {{to}}?",
+    "handoffSuggestPercent": "{{from}} израсходовал {{percent}}% лимита. Перенести разговор на {{to}}?",
+    "handoffSuggestAccept": "Продолжить на {{to}}",
+    "handoffSuggestSwitching": "Переношу…",
+    "handoffSuggestDismiss": "Не сейчас",
+    "handoffSuggestFailed": "Не удалось перенести разговор на {{to}}. Попробуйте ещё раз или проверьте, что он авторизован.",
     "handoffOpen": "Открыть"
   },
   "providerSelection": {

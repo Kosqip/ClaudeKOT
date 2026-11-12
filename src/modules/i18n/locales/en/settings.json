@@ -514,8 +514,8 @@
     "error": "Error: {{error}}",
     "handoffThreshold": {
       "title": "Automatic backend handoff",
-      "description": "When Claude’s own usage reaches this level, a session on a fallback backend is prepared automatically once the current reply ends. \"Only on full limit\" waits for Claude to refuse a request.",
-      "onlyFullLimit": "Only on full limit",
+      "description": "When Claude’s own usage reaches this level, you are offered a one-click move to a fallback backend once the current reply ends. If Claude refuses a request, the conversation always moves on its own.",
+      "onlyFullLimit": "Never offer, only move on refusal",
       "atPercent": "At {{percent}}%"
     },
     "handoffFallbackOrder": {

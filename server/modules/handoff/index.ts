@@ -18,6 +18,12 @@ export {
   shouldHandoffForRateLimitStatus,
 } from '@/modules/handoff/services/limit-handoff.service.js';
 
+// suggestHandoff: used by server/index.ts to offer a switch (without starting
+// one) when a turn ends above the user's threshold. readStoredFallbackOrder:
+// the user's own fallback order, applied by server/index.ts on every
+// automatic path.
+export { readStoredFallbackOrder, suggestHandoff } from '@/modules/handoff/services/limit-handoff.service.js';
+
 // Mounted at /api/handoff in server/index.ts, behind the same
 // authenticateToken middleware every other provider-facing route uses.
 export { default as handoffRoutes } from '@/modules/handoff/handoff.routes.js';

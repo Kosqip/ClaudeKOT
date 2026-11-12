@@ -780,6 +780,21 @@ export type HandoffNotice = {
   mode: 'continue' | 'standby';
 };
 
+/**
+ * A `handoff_suggestion` event: `sessionId`'s backend is close to its usage
+ * limit and `toProvider` is ready to take over. Nothing has been started —
+ * the switch happens only if the user accepts. Mirrors the server's
+ * `HandoffSuggestion`.
+ */
+export type HandoffSuggestion = {
+  sessionId: string;
+  fromProvider: LLMProvider;
+  toProvider: LLMProvider;
+  reason: string;
+  /** Share of the window used, 0–100, when the provider reported one. */
+  utilizationPercent?: number;
+};
+
 // ---------------------------
 
 //----------------- CHAT COMPOSER ------------

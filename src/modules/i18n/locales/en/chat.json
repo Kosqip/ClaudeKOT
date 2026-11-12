@@ -198,7 +198,13 @@
     },
     "rateLimitUsage": "Claude usage: {{percent}}%",
     "handoffContinued": "{{from}} hit its usage limit — this conversation continues in a new {{to}} session.",
-    "handoffStandby": "{{from}} is close to its usage limit — a {{to}} session with this conversation is ready to take over.",
+    "handoffStandby": "This conversation was moved to a new {{to}} session, which is waiting for your next instruction.",
+    "handoffSuggest": "{{from}} is close to its usage limit. Move this conversation to {{to}}?",
+    "handoffSuggestPercent": "{{from}} has used {{percent}}% of its limit. Move this conversation to {{to}}?",
+    "handoffSuggestAccept": "Continue on {{to}}",
+    "handoffSuggestSwitching": "Moving…",
+    "handoffSuggestDismiss": "Not now",
+    "handoffSuggestFailed": "Could not move the conversation to {{to}}. Try again, or check that it is signed in.",
     "handoffOpen": "Open"
   },
   "composer": {

@@ -1,9 +1,9 @@
 import express from 'express';
 import type { Request, Response } from 'express';
 
-import { handoffSessionOnLimit } from '@/modules/handoff/services/limit-handoff.service.js';
+import { handoffSessionOnLimit, readStoredFallbackOrder } from '@/modules/handoff/services/limit-handoff.service.js';
 import { providerRuntimeService } from '@/modules/providers/index.js';
-import type { LLMProvider, ProviderLimitReason } from '@/shared/types.js';
+import type { LimitHandoffMode, LLMProvider, ProviderLimitReason } from '@/shared/types.js';
 import { AppError, asyncHandler, createApiSuccessResponse } from '@/shared/utils.js';
 
 type AuthenticatedRequest = Request & { user?: { id?: number | string } };
@@ -46,13 +46,25 @@ function readFallbackOrder(value: unknown): LLMProvider[] | undefined {
   return value as LLMProvider[];
 }
 
+function readMode(value: unknown): LimitHandoffMode {
+  if (value === undefined || value === 'continue' || value === 'standby') {
+    return value ?? 'continue';
+  }
+  throw new AppError('mode must be "continue" or "standby".', {
+    code: 'INVALID_REQUEST_BODY',
+    statusCode: 400,
+  });
+}
+
 const router = express.Router();
 
 /**
  * Manually moves a session to a fallback provider, carrying its history
  * over — the same action `server/index.ts` performs automatically when a
  * running turn reports a usage limit, here on the user's request and
- * without the one-handoff-per-session claim the automatic path takes.
+ * without the one-handoff-per-session claim the automatic path takes. Also
+ * how a `handoff_suggestion` is accepted (`mode: 'standby'`). Without a
+ * `fallbackOrder` in the body the user's saved order applies.
  * Responds once the fallback session's turn has started.
  */
 router.post(
@@ -63,12 +75,14 @@ router.post(
       throw new AppError('sessionId is required.', { code: 'INVALID_REQUEST_BODY', statusCode: 400 });
     }
 
+    const userId = readUserId(req);
     const result = await handoffSessionOnLimit(
       {
         fromSessionId: body.sessionId,
-        userId: readUserId(req),
+        userId,
         reason: readReason(body.reason),
-        fallbackOrder: readFallbackOrder(body.fallbackOrder),
+        mode: readMode(body.mode),
+        fallbackOrder: readFallbackOrder(body.fallbackOrder) ?? readStoredFallbackOrder(userId),
       },
       providerRuntimeService,
     );

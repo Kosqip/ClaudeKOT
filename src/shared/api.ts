@@ -316,6 +316,13 @@ export const api = {
     plan: (body: { sessionId: string; task: string }) => post('/api/orchestrator/plan', body),
   },
 
+  // Moves a session's conversation to the next backend in the user's
+  // fallback order. Used by the chat's "switch backend" suggestion banner.
+  handoff: {
+    trigger: (body: { sessionId: string; reason: string; mode?: 'continue' | 'standby' }) =>
+      post('/api/handoff/trigger', body),
+  },
+
   taskRouter: {
     dispatch: (body: { projectPath: string; content: string; explicitTag?: string }) =>
       post('/api/task-router/dispatch', body),

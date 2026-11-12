@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import type { Dispatch, MutableRefObject, SetStateAction } from 'react';
 
-import type { ServerEvent,MarkSessionIdle,MarkSessionProcessing,PendingPermissionRequest,ProjectSession,LLMProvider,NormalizedMessage,GetSessionActivity,MarkSessionBackground,SideQuestionEvent,SteerOutcome,RateLimitStatus,HandoffNotice } from '@/shared/types';
+import type { ServerEvent,MarkSessionIdle,MarkSessionProcessing,PendingPermissionRequest,ProjectSession,LLMProvider,NormalizedMessage,GetSessionActivity,MarkSessionBackground,SideQuestionEvent,SteerOutcome,RateLimitStatus,HandoffNotice,HandoffSuggestion } from '@/shared/types';
 import { showCompletionTitleIndicator } from '@/modules/chat/utils/pageTitleNotification';
 import { playChatCompletionSound, playNotificationSound } from '@/shared/utils';
 import type { SessionStore } from '@/modules/chat/hooks/useSessionStore';
@@ -60,6 +60,8 @@ type UseChatRealtimeHandlersArgs = {
   onRateLimitStatus?: (sessionId: string, status: RateLimitStatus) => void;
   /** The server moved a session to another backend over a usage limit; shown as a banner in that session. */
   onHandoffNotice?: (notice: HandoffNotice) => void;
+  /** A session's backend is close to its limit and another is ready; shown as an offer to switch in that session. */
+  onHandoffSuggestion?: (suggestion: HandoffSuggestion) => void;
 };
 
 /* ------------------------------------------------------------------ */
@@ -98,6 +100,7 @@ export function useChatRealtimeHandlers({
   onSteerOutcome,
   onRateLimitStatus,
   onHandoffNotice,
+  onHandoffSuggestion,
 }: UseChatRealtimeHandlersArgs) {
   // Session switches can send `chat.subscribe` before this effect has a chance
   // to rebind the websocket listener. Read the visible session id from a ref
@@ -202,6 +205,13 @@ export function useChatRealtimeHandlers({
           // rather than fall back to whichever one is on screen.
           if (typeof msg.sessionId === 'string' && typeof msg.toSessionId === 'string') {
             onHandoffNotice?.(msg as unknown as HandoffNotice);
+          }
+          return;
+        }
+
+        case 'handoff_suggestion': {
+          if (typeof msg.sessionId === 'string' && typeof msg.toProvider === 'string') {
+            onHandoffSuggestion?.(msg as unknown as HandoffSuggestion);
           }
           return;
         }
@@ -523,5 +533,6 @@ export function useChatRealtimeHandlers({
     onSteerOutcome,
     onRateLimitStatus,
     onHandoffNotice,
+    onHandoffSuggestion,
   ]);
 }

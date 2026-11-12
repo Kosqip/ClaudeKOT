@@ -247,7 +247,8 @@ export type GatewayEventKind =
   | 'protocol_error'
   | 'side_question'
   | 'scheduled_messages_changed'
-  | 'handoff_notice';
+  | 'handoff_notice'
+  | 'handoff_suggestion';
 
 /**
  * Complete set of `kind` values emitted to websocket clients.
@@ -1890,11 +1891,29 @@ export type LimitHandoffResult = {
  * What the fallback session is asked to do with the history it is handed.
  * `continue` picks the interrupted work straight back up — used when the
  * original provider actually refused a request. `standby` only loads the
- * context and waits — used for a proactive switch made at the end of a turn
- * that finished normally, where there is nothing left unfinished to resume
- * and "continuing" would have the fallback invent work.
+ * context and waits — used when the user accepts a `HandoffSuggestion` after
+ * a turn that finished normally, where there is nothing left unfinished to
+ * resume and "continuing" would have the fallback invent work.
  */
 export type LimitHandoffMode = 'continue' | 'standby';
+
+/**
+ * An offer to move a session before its provider runs out: sent as a
+ * `handoff_suggestion` event once a turn ends with the provider's usage at
+ * or above the user's threshold. Nothing is started — the fallback session
+ * is only created if the user accepts (`POST /api/handoff/trigger` with
+ * `mode: 'standby'`), so no fallback quota is spent on a session that may
+ * never be used and the history it gets is the one current at that moment.
+ */
+export type HandoffSuggestion = {
+  fromSessionId: string;
+  fromProvider: LLMProvider;
+  /** The fallback that would take over: first in the user's order that is ready. */
+  toProvider: LLMProvider;
+  reason: ProviderLimitReason;
+  /** Share of the window used, 0–100, when the provider reported one. */
+  utilizationPercent?: number;
+};
 
 /**
  * Claude's own live rate-limit utilization, carried on a `rate_limit_status`

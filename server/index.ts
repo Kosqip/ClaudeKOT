@@ -10,7 +10,7 @@ import express, { type NextFunction, type Request, type Response } from 'express
 import cors from 'cors';
 
 import { AppError, findApplicationRoot, getModuleDirectory, IS_PLATFORM, terminalTextStyles } from '@/shared/utils.js';
-import type { LimitHandoffMode, LLMProvider, ProviderLimitReason, RateLimitStatus } from '@/shared/types.js';
+import type { LLMProvider, ProviderLimitReason, RateLimitStatus } from '@/shared/types.js';
 import {
     closeSessionsWatcher,
     detectProviderLimit,
@@ -22,8 +22,10 @@ import { chatRunRegistry, createWebSocketServer, onRunSettled } from '@/modules/
 import {
     DEFAULT_HANDOFF_THRESHOLD_PERCENT,
     handoffSessionOnLimit,
+    readStoredFallbackOrder,
     releaseHandoffClaim,
     shouldHandoffForRateLimitStatus,
+    suggestHandoff,
     tryClaimHandoff,
 } from '@/modules/handoff/index.js';
 
@@ -117,61 +119,50 @@ const agentRoutes = createAgentModule({
 // (agents, workflows, backgrounded commands) is still reporting through it.
 chatRunRegistry.setRetentionGuard((sessionId) => providerRuntimeService.hasBackgroundWork(sessionId));
 
-const KNOWN_LLM_PROVIDERS: LLMProvider[] = ['claude', 'codex', 'cursor', 'opencode', 'openrouter'];
-
-/**
- * Reads the user's configured `handoffFallbackOrder` preference, validating
- * that it is really an array of known provider ids before trusting it —
- * `userPreferencesDb` stores arbitrary JSON, so a stale or hand-edited value
- * is treated as "not set" (returns `undefined`) rather than passed through,
- * letting `handoffSessionOnLimit` fall back to its own default order.
- */
-function readStoredFallbackOrder(userId: number): LLMProvider[] | undefined {
-    const stored = userPreferencesDb.getPreferences(userId).handoffFallbackOrder;
-    if (!Array.isArray(stored) || stored.length === 0) {
-        return undefined;
-    }
-    const isValid = stored.every((entry) => KNOWN_LLM_PROVIDERS.includes(entry));
-    return isValid ? stored as LLMProvider[] : undefined;
-}
-
 type AutoHandoffRequest = {
     sessionId: string;
     userId: number;
     reason: ProviderLimitReason;
-    mode: LimitHandoffMode;
     resetsAt?: string;
 };
 
-/**
- * Sessions whose provider crossed the proactive threshold while a turn was
- * still running. Handing off right then would put two agents to work on the
- * same task in the same folder, so the switch waits for that turn to settle
- * (`onRunSettled` below).
- */
-const pendingProactiveHandoffs = new Map<string, AutoHandoffRequest>();
+type PendingHandoffSuggestion = {
+    sessionId: string;
+    userId: number;
+    reason: ProviderLimitReason;
+    utilizationPercent?: number;
+};
 
 /**
- * Starts one automatic handoff. The handoff and websocket modules cannot
- * import each other (handoff needs the websocket module to start a turn), so
- * this composition root is where a limit signal from a running chat turn is
- * turned into a `handoffSessionOnLimit` call. A session is claimed first, so
- * a limit reported several times opens one fallback session, not several;
- * a failure is logged and the claim given back, never surfaced as a second
- * error on top of the turn that already failed.
+ * Sessions whose provider crossed the user's threshold while a turn was
+ * running. The offer to switch is made when that turn settles
+ * (`onRunSettled` below): accepting it mid-turn would put two agents to work
+ * on the same task in the same folder.
+ */
+const pendingHandoffSuggestions = new Map<string, PendingHandoffSuggestion>();
+
+/**
+ * Moves a session whose provider refused a request to a fallback backend,
+ * which continues the interrupted work. The handoff and websocket modules
+ * cannot import each other (handoff needs the websocket module to start a
+ * turn), so this composition root is where a limit signal from a running
+ * chat turn is turned into a `handoffSessionOnLimit` call. A session is
+ * claimed first, so a limit reported several times opens one fallback
+ * session, not several; a failure is logged and the claim given back, never
+ * surfaced as a second error on top of the turn that already failed.
  */
 function startAutoHandoff(request: AutoHandoffRequest): void {
-    if (!tryClaimHandoff(request.sessionId, request.mode)) {
+    if (!tryClaimHandoff(request.sessionId, 'continue')) {
         return;
     }
-    pendingProactiveHandoffs.delete(request.sessionId);
+    pendingHandoffSuggestions.delete(request.sessionId);
 
     handoffSessionOnLimit(
         {
             fromSessionId: request.sessionId,
             userId: request.userId,
             reason: request.reason,
-            mode: request.mode,
+            mode: 'continue',
             resetsAt: request.resetsAt,
             fallbackOrder: readStoredFallbackOrder(request.userId),
         },
@@ -203,7 +194,7 @@ function handleRunFailureForAutoHandoff(input: { provider: LLMProvider; sessionI
     if (!detection.detected || userId === null) {
         return;
     }
-    startAutoHandoff({ sessionId: input.sessionId, userId, reason: detection.reason, mode: 'continue' });
+    startAutoHandoff({ sessionId: input.sessionId, userId, reason: detection.reason });
 }
 
 /**
@@ -212,8 +203,8 @@ function handleRunFailureForAutoHandoff(input: { provider: LLMProvider; sessionI
  * is rejected. A rejection moves the session at once and has the fallback
  * continue the interrupted work. Reaching the user's threshold
  * (`handoffThresholdPercent`, default `DEFAULT_HANDOFF_THRESHOLD_PERCENT`;
- * 100 turns this off) without a rejection only schedules the move for when
- * the running turn ends, and the fallback then waits for instructions.
+ * 100 turns this off) without a rejection starts nothing: once the running
+ * turn ends the user is offered the switch, one time per session.
  */
 function handleRateLimitStatusForAutoHandoff(input: { provider: LLMProvider; sessionId: string; userId: string | number | null; status: RateLimitStatus }): void {
     const userId = readHandoffUserId(input.userId);
@@ -229,25 +220,50 @@ function handleRateLimitStatusForAutoHandoff(input: { provider: LLMProvider; ses
         return;
     }
 
-    const request: AutoHandoffRequest = {
+    if (input.status.status === 'rejected') {
+        startAutoHandoff({ sessionId: input.sessionId, userId, reason: decision.reason, resetsAt: input.status.resetsAt });
+        return;
+    }
+    pendingHandoffSuggestions.set(input.sessionId, {
         sessionId: input.sessionId,
         userId,
         reason: decision.reason,
-        mode: input.status.status === 'rejected' ? 'continue' : 'standby',
-        resetsAt: input.status.resetsAt,
-    };
-    if (request.mode === 'continue') {
-        startAutoHandoff(request);
-    } else {
-        pendingProactiveHandoffs.set(input.sessionId, request);
-    }
+        utilizationPercent: typeof input.status.utilization === 'number'
+            ? Math.round(input.status.utilization * 100)
+            : undefined,
+    });
 }
 
 onRunSettled((sessionId) => {
-    const pending = pendingProactiveHandoffs.get(sessionId);
-    if (pending) {
-        startAutoHandoff(pending);
+    const pending = pendingHandoffSuggestions.get(sessionId);
+    if (!pending) {
+        return;
     }
+    pendingHandoffSuggestions.delete(sessionId);
+    // `standby` is the once-per-session marker for the offer; a session
+    // already moved on a refusal (`continue`) is not offered anything.
+    if (!tryClaimHandoff(sessionId, 'standby')) {
+        return;
+    }
+    suggestHandoff(
+        {
+            fromSessionId: sessionId,
+            reason: pending.reason,
+            utilizationPercent: pending.utilizationPercent,
+            fallbackOrder: readStoredFallbackOrder(pending.userId),
+        },
+        providerRuntimeService,
+    )
+        .then((suggestion) => {
+            if (!suggestion) {
+                // Nothing to offer right now; a later turn may find a fallback ready.
+                releaseHandoffClaim(sessionId);
+            }
+        })
+        .catch((error) => {
+            releaseHandoffClaim(sessionId);
+            console.error('[Handoff] Could not offer a switch', { sessionId, error });
+        });
 });
 
 createWebSocketServer(server, {

@@ -9,12 +9,12 @@ import {
 } from '@/shared/userSettings';
 
 /**
- * Global (not per-provider) control for when the handoff module moves a
- * Claude session to a fallback backend automatically: at a hard rejection
- * only (100), or — prepared at the end of the running reply — once
- * claude.ai's own reported utilization reaches one of 95/90/85/80 percent. Rendered once in the agents settings
- * tab, below the per-provider account/model sections — this setting is not
- * scoped to any one provider.
+ * Global (not per-provider) control for when the handoff module offers to
+ * move a Claude session to a fallback backend: never (100 — the session
+ * still moves on its own when Claude refuses a request), or, at the end of
+ * the running reply, once claude.ai's own reported utilization reaches one
+ * of 95/90/85/80 percent. Rendered once in the agents settings tab, below
+ * the per-provider account/model sections.
  */
 export default function HandoffThresholdSetting() {
   const { t } = useTranslation('settings');

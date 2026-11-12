@@ -3,12 +3,13 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-import { sessionsDb } from '@/modules/database/index.js';
+import { sessionsDb, userPreferencesDb } from '@/modules/database/index.js';
 import { mapClaudeRateLimitType, providerAuthService, sessionsService } from '@/modules/providers/index.js';
 import type { ProviderRuntimeGateway } from '@/modules/websocket/index.js';
 import { broadcastToConnectedClients, startDetachedChatTurn } from '@/modules/websocket/index.js';
 import { AppError } from '@/shared/utils.js';
 import type {
+  HandoffSuggestion,
   LimitHandoffMode,
   LimitHandoffResult,
   LLMProvider,
@@ -26,11 +27,11 @@ import type {
 const claimedSessions = new Map<string, LimitHandoffMode>();
 
 /**
- * Claims an automatic handoff for a session; false when one in this mode (or
- * a stronger one) was already claimed. A `continue` claim may follow a
- * `standby` one: a user who kept working in the original session after a
- * proactive switch still gets moved when the provider finally refuses a
- * request. Used by `server/index.ts`; the manual route does not claim, since
+ * Claims an automatic action for a session; false when one in this mode (or
+ * a stronger one) was already claimed. `standby` is the one-time suggestion
+ * to switch, `continue` the automatic move on a refusal — which may follow a
+ * suggestion: a user who kept working in the original session still gets
+ * moved when the provider finally refuses a request. Used by `server/index.ts`; the manual route does not claim, since
  * the user asking again is the point.
  */
 export function tryClaimHandoff(sessionId: string, mode: LimitHandoffMode): boolean {
@@ -216,6 +217,78 @@ export function pickFallbackProvider(
   return listFallbackCandidates(fallbackOrder, excludeProvider, runtime)[0] ?? null;
 }
 
+const KNOWN_PROVIDERS: LLMProvider[] = ['claude', 'codex', 'cursor', 'opencode', 'openrouter'];
+
+/**
+ * The user's own fallback order from settings (`handoffFallbackOrder`), or
+ * `undefined` to use `DEFAULT_FALLBACK_ORDER`. Preferences are stored as
+ * arbitrary JSON, so anything that is not a non-empty list of known provider
+ * ids counts as not set. Used by `server/index.ts` and `handoff.routes.ts`.
+ */
+export function readStoredFallbackOrder(userId: number): LLMProvider[] | undefined {
+  const stored = userPreferencesDb.getPreferences(userId).handoffFallbackOrder;
+  if (!Array.isArray(stored) || stored.length === 0) {
+    return undefined;
+  }
+  return stored.every((entry) => KNOWN_PROVIDERS.includes(entry)) ? stored as LLMProvider[] : undefined;
+}
+
+/** The first fallback for `fromProvider` that is installed, signed in and not at its own limit; null when there is none. */
+async function findReadyFallback(
+  fromProvider: LLMProvider,
+  fallbackOrder: LLMProvider[] | undefined,
+  runtime: ProviderRuntimeGateway,
+  isReady: (provider: LLMProvider) => Promise<boolean>,
+): Promise<LLMProvider | null> {
+  for (const candidate of listFallbackCandidates(fallbackOrder ?? DEFAULT_FALLBACK_ORDER, fromProvider, runtime)) {
+    if (await isReady(candidate)) {
+      return candidate;
+    }
+  }
+  return null;
+}
+
+/**
+ * Offers to move a session whose provider is close to its limit, without
+ * starting anything: tells every connected client with a `handoff_suggestion`
+ * event naming the fallback that would take over. Resolves to null — and
+ * sends nothing — when the session is gone or no fallback is ready, since an
+ * offer the user cannot accept is only noise.
+ *
+ * Consumed by `server/index.ts` once a turn ends above the user's threshold.
+ */
+export async function suggestHandoff(
+  input: {
+    fromSessionId: string;
+    reason: ProviderLimitReason;
+    /** Share of the window used, 0–100. */
+    utilizationPercent?: number;
+    fallbackOrder?: LLMProvider[];
+  },
+  runtime: ProviderRuntimeGateway,
+  isReady: (provider: LLMProvider) => Promise<boolean> = isProviderReady,
+): Promise<HandoffSuggestion | null> {
+  const fromSession = sessionsDb.getSessionById(input.fromSessionId);
+  if (!fromSession) {
+    return null;
+  }
+  const fromProvider = fromSession.provider as LLMProvider;
+  const toProvider = await findReadyFallback(fromProvider, input.fallbackOrder, runtime, isReady);
+  if (!toProvider) {
+    return null;
+  }
+
+  const suggestion: HandoffSuggestion = {
+    fromSessionId: input.fromSessionId,
+    fromProvider,
+    toProvider,
+    reason: input.reason,
+    utilizationPercent: input.utilizationPercent,
+  };
+  broadcastToConnectedClients(JSON.stringify({ kind: 'handoff_suggestion', sessionId: input.fromSessionId, ...suggestion }));
+  return suggestion;
+}
+
 /** True when `provider` is installed and signed in, so a session handed to it can actually run. */
 async function isProviderReady(provider: LLMProvider): Promise<boolean> {
   try {
@@ -230,8 +303,10 @@ async function isProviderReady(provider: LLMProvider): Promise<boolean> {
  * Moves a session's conversation to a fallback provider after its current
  * provider hit a subscription/rate limit, or is about to.
  *
- * Records the original provider as limited, picks the first fallback that is
- * installed, signed in and not itself limited, writes the session's history
+ * Records the original provider as limited when it refused a request
+ * (`continue` — one that is merely close stays usable as a fallback for
+ * others), picks the first fallback that is installed, signed in and not
+ * itself limited, writes the session's history
  * to a file (`writeHandoffContextFile`), opens a new session for the fallback
  * in the same project and starts it with a short note pointing at that file.
  * `mode` decides what the note asks for — see `LimitHandoffMode`. The
@@ -268,16 +343,13 @@ export async function handoffSessionOnLimit(
   }
 
   const fromProvider = fromSession.provider as LLMProvider;
-  const resetsAtMs = input.resetsAt ? Date.parse(input.resetsAt) : Number.NaN;
-  markProviderLimited(fromProvider, Number.isFinite(resetsAtMs) && resetsAtMs > Date.now() ? resetsAtMs : undefined);
-
-  let toProvider: LLMProvider | null = null;
-  for (const candidate of listFallbackCandidates(input.fallbackOrder ?? DEFAULT_FALLBACK_ORDER, fromProvider, runtime)) {
-    if (await isReady(candidate)) {
-      toProvider = candidate;
-      break;
-    }
+  const mode = input.mode ?? 'continue';
+  if (mode === 'continue') {
+    const resetsAtMs = input.resetsAt ? Date.parse(input.resetsAt) : Number.NaN;
+    markProviderLimited(fromProvider, Number.isFinite(resetsAtMs) && resetsAtMs > Date.now() ? resetsAtMs : undefined);
   }
+
+  const toProvider = await findReadyFallback(fromProvider, input.fallbackOrder, runtime, isReady);
   if (!toProvider) {
     throw new AppError('No fallback backend is available to continue this session: each one is not installed, not signed in, or at its own limit.', {
       code: 'NO_FALLBACK_PROVIDER',
@@ -297,15 +369,16 @@ export async function handoffSessionOnLimit(
   );
 
   const contextFilePath = await writeHandoffContextFile(toSessionId, historyText);
-  const mode = input.mode ?? 'continue';
 
   const openingMessage = mode === 'continue'
     ? [
       `[Continued automatically: the previous backend hit ${REASON_LABEL[input.reason]}.]`,
       `The prior conversation is saved at ${contextFilePath} — read it first, then continue from where it leaves off.`,
+      // The previous agent was cut off mid-task: what it says it did and what is on disk can differ.
+      'The previous backend was interrupted and may have left changes half-made. Before redoing or building on any step, check the actual state of the working folder (for example `git status` and `git diff`) and trust it over the conversation.',
     ].join('\n\n')
     : [
-      `[Switched automatically: the previous backend is close to ${REASON_LABEL[input.reason]}.]`,
+      `[Switched: the previous backend is close to ${REASON_LABEL[input.reason]}.]`,
       `The prior conversation is saved at ${contextFilePath} — read it so you have the context. Its last turn finished normally, so do not start any work yet: reply briefly that you are ready and wait for the next instruction.`,
     ].join('\n\n');
 

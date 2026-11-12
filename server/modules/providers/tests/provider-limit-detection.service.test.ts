@@ -83,3 +83,21 @@ test('the API provider limit is recognised for each service the runtime actually
     );
   }
 });
+
+test('codex: text that merely mentions a quota or the number 429 is not a limit', () => {
+  assert.deepEqual(detectProviderLimit('codex', { message: 'ENOENT: no such file src/quota/429.ts' }), { detected: false });
+  assert.deepEqual(detectProviderLimit('codex', { message: 'Test failed at line 429' }), { detected: false });
+});
+
+test('codex: its own limit wordings are detected', () => {
+  for (const message of ['usageLimitExceeded', 'Too Many Requests', 'insufficient_quota', 'Quota exceeded for this workspace']) {
+    assert.deepEqual(detectProviderLimit('codex', { message }), { detected: true, reason: 'unknown_limit' }, message);
+  }
+});
+
+test('openrouter: a 402 (balance spent) is treated as a limit', () => {
+  assert.deepEqual(
+    detectProviderLimit('openrouter', { message: 'openrouter request failed (402): Insufficient credits' }),
+    { detected: true, reason: 'unknown_limit' },
+  );
+});

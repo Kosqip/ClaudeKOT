@@ -11,6 +11,14 @@ import { createAgentRouter } from '../agent.routes.js';
 
 type AgentDependencies = Parameters<typeof createAgentRouter>[0];
 
+// The routes log their progress with console.log, which in a test process is
+// the same stdout the node:test runner reads its own binary result frames
+// from. Under load the two interleave and the runner fails the whole file
+// with "Unable to deserialize cloned data" although every test passed.
+test.before(() => {
+  console.log = () => undefined;
+});
+
 function createDependencies(
   overrides: Partial<AgentDependencies> = {},
 ): AgentDependencies {

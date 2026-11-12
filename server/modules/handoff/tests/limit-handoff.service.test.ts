@@ -15,6 +15,7 @@ import {
   releaseHandoffClaim,
   renderHistoryAsText,
   resetHandoffState,
+  suggestHandoff,
   tryClaimHandoff,
   writeHandoffContextFile,
 } from '@/modules/handoff/services/limit-handoff.service.js';
@@ -168,6 +169,7 @@ test('handoffSessionOnLimit opens a session on the first fallback that is signed
     const contextFile = path.join(os.homedir(), '.cloudcli', 'handoff-context', `${result.toSessionId}.md`);
     assert.ok(turns[0].command.includes(contextFile));
     assert.match(turns[0].command, /continue from where it leaves off/);
+    assert.match(turns[0].command, /git status/);
   });
 });
 
@@ -205,5 +207,52 @@ test('two exhausted backends do not hand a conversation back and forth', async (
       ),
       /No fallback backend is available/,
     );
+  });
+});
+
+test('a standby handoff does not record the original provider as limited', async () => {
+  await withHandoffDatabase(async ({ projectPath, runtime }) => {
+    sessionsDb.createAppSession('from-session', 'claude', projectPath);
+    await handoffSessionOnLimit(
+      { fromSessionId: 'from-session', userId: 1, reason: 'five_hour', mode: 'standby', fallbackOrder: ['codex'] },
+      runtime,
+      async () => true,
+    );
+    // Close to a limit is not at it: Claude can still take over for someone else.
+    assert.equal(isProviderLimited('claude'), false);
+  });
+});
+
+test('suggestHandoff names the ready fallback and starts nothing', async () => {
+  await withHandoffDatabase(async ({ projectPath, runtime, turns }) => {
+    sessionsDb.createAppSession('from-session', 'claude', projectPath);
+
+    const suggestion = await suggestHandoff(
+      { fromSessionId: 'from-session', reason: 'five_hour', utilizationPercent: 91, fallbackOrder: ['codex', 'openrouter'] },
+      runtime,
+      async (provider) => provider === 'openrouter',
+    );
+
+    assert.deepEqual(suggestion, {
+      fromSessionId: 'from-session',
+      fromProvider: 'claude',
+      toProvider: 'openrouter',
+      reason: 'five_hour',
+      utilizationPercent: 91,
+    });
+    assert.equal(turns.length, 0);
+    assert.equal(isProviderLimited('claude'), false);
+  });
+});
+
+test('suggestHandoff offers nothing when no fallback is ready', async () => {
+  await withHandoffDatabase(async ({ projectPath, runtime }) => {
+    sessionsDb.createAppSession('from-session', 'claude', projectPath);
+    const suggestion = await suggestHandoff(
+      { fromSessionId: 'from-session', reason: 'five_hour', fallbackOrder: ['codex'] },
+      runtime,
+      async () => false,
+    );
+    assert.equal(suggestion, null);
   });
 });

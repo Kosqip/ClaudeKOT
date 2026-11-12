@@ -39,12 +39,19 @@ export function mapClaudeRateLimitType(rateLimitType: string | undefined): 'five
  * package.json; text matching is the only signal available, so this is
  * strictly less reliable than Claude's structured field above and can miss a
  * reworded message in a future SDK release.
+ *
+ * The patterns name a limit specifically: a bare "quota" or "429" also
+ * appears in ordinary output (a file path, a line number, a disk-quota
+ * error), and a false match would move the session to another backend over
+ * an unrelated failure. `usageLimitExceeded` is Codex's own error code.
  */
 const CODEX_RATE_LIMIT_TEXT_PATTERNS = [
   /rate.?limit/i,
-  /usage limit/i,
-  /quota/i,
-  /\b429\b/i,
+  /usage.?limit/i,
+  /too many requests/i,
+  /quota[ _-]?(?:exceeded|exhausted|reached)/i,
+  /insufficient.?quota/i,
+  /(?:http|status|code)[ :/]?429/i,
 ];
 
 /**
@@ -107,6 +114,12 @@ export function detectProviderLimit(
     const statusMatch = signal.message?.match(/\b(?:openrouter|anthropic|openai) request failed \((\d+)\)/i);
     if (statusMatch && statusMatch[1] === '429') {
       return { detected: true, reason: 'rate_limit' };
+    }
+    // 402 is "out of credits" (OpenRouter's documented status for a spent
+    // balance): the key works but nothing more will be served until it is
+    // topped up, which for the conversation is the same as a spent limit.
+    if (statusMatch && statusMatch[1] === '402') {
+      return { detected: true, reason: 'unknown_limit' };
     }
     return { detected: false };
   }
