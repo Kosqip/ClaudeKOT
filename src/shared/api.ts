@@ -309,6 +309,13 @@ export const api = {
       post('/api/mix/dispatch', body),
   },
 
+  // Splits a task into subtasks on an orchestrator-role session and opens a
+  // new session per subtask on whichever provider holds its role. Used by
+  // the orchestrator module's plan panel.
+  orchestrator: {
+    plan: (body: { sessionId: string; task: string }) => post('/api/orchestrator/plan', body),
+  },
+
   // Workspace file tree
   readFile: (projectId: string, filePath: string) =>
     get(`/api/file-tree/projects/${projectId}/file${query({ filePath })}`),

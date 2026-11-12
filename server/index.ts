@@ -51,6 +51,7 @@ import {
 import providerRoutes from './modules/providers/provider.routes.js';
 import { mixRoutes } from './modules/mix/index.js';
 import { handoffRoutes } from './modules/handoff/index.js';
+import { orchestratorRoutes } from './modules/orchestrator/index.js';
 import { voiceRoutes } from './modules/voice/index.js';
 import {
     closeScheduledMessageDispatcher,
@@ -319,6 +320,7 @@ app.use('/api/browser-use', authenticateToken, browserUseRoutes);
 app.use('/api/providers', authenticateToken, providerRoutes);
 app.use('/api/mix', authenticateToken, mixRoutes);
 app.use('/api/handoff', authenticateToken, handoffRoutes);
+app.use('/api/orchestrator', authenticateToken, orchestratorRoutes);
 app.use('/api/scheduled-messages', authenticateToken, scheduledMessagesRoutes);
 
 // Agent API Routes (uses API key authentication)

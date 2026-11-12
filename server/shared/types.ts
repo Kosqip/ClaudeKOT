@@ -1902,3 +1902,43 @@ export type RateLimitStatus = {
   utilization?: number;
   resetsAt?: string;
 };
+
+// ---------------------------
+//----------------- ORCHESTRATOR TYPES ------------
+/**
+ * The role a user has assigned one provider in settings (`providerRoles` on
+ * `UserPreferences`, `src/shared/userSettings.ts` — this mirrors that
+ * literal union by hand). `'orchestrator'` is the backend asked to split a
+ * task into subtasks; `'hands'`/`'routine'` are the backends subtasks are
+ * delegated to.
+ */
+export type ProviderRole = 'orchestrator' | 'hands' | 'routine';
+
+/**
+ * One subtask of an orchestrator's plan, exactly as parsed from its JSON
+ * response — `role` is still the abstract role, not yet resolved to a
+ * concrete provider (that happens in `resolveSubtaskProvider`, against the
+ * caller's own `providerRoles`).
+ */
+export type OrchestratorSubtask = {
+  title: string;
+  description: string;
+  role: 'hands' | 'routine';
+};
+
+/**
+ * One subtask after dispatch: its abstract role, the concrete provider and
+ * new session it was sent to (absent when no provider holds that role), and
+ * whether the turn actually started. Mirrors `MixDispatchResult`'s shape
+ * (`started`/`error`) for the same reason — the subtask's own reply streams
+ * through its new session's ordinary `chat.subscribe` channel, not through
+ * this result.
+ */
+export type OrchestratorSubtaskResult = {
+  title: string;
+  role: 'hands' | 'routine';
+  provider?: LLMProvider;
+  sessionId?: string;
+  started: boolean;
+  error?: string;
+};
