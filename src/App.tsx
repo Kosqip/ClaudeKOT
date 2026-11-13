@@ -115,20 +115,27 @@ export default function App() {
         <UiPreferencesProvider>
         <AuthProvider>
           <WebSocketProvider>
-            <PluginsProvider>
-              <TasksSettingsProvider>
-                <TaskMasterProvider>
-                <ProtectedRoute>
-                  <Router basename={routerBasename}>
-                    <Routes>
-                      <Route path="/" element={<ProjectWorkspaceRoute />} />
-                      <Route path="/session/:sessionId" element={<ProjectWorkspaceRoute />} />
-                    </Routes>
-                  </Router>
-                </ProtectedRoute>
-                </TaskMasterProvider>
-              </TasksSettingsProvider>
-            </PluginsProvider>
+            {/* Inside the auth gate on purpose: each of these providers fetches
+                once when it mounts, and above the gate that first fetch lands
+                before there is a token. The 401 it then gets is never retried,
+                so an installed plugin stays invisible (no plugin tab) and the
+                TaskMaster status stays unknown for the whole session. Mounting
+                them only once the user is in means that single fetch is
+                authenticated. */}
+            <ProtectedRoute>
+              <PluginsProvider>
+                <TasksSettingsProvider>
+                  <TaskMasterProvider>
+                    <Router basename={routerBasename}>
+                      <Routes>
+                        <Route path="/" element={<ProjectWorkspaceRoute />} />
+                        <Route path="/session/:sessionId" element={<ProjectWorkspaceRoute />} />
+                      </Routes>
+                    </Router>
+                  </TaskMasterProvider>
+                </TasksSettingsProvider>
+              </PluginsProvider>
+            </ProtectedRoute>
           </WebSocketProvider>
         </AuthProvider>
         </UiPreferencesProvider>

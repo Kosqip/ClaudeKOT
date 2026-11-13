@@ -279,7 +279,10 @@ export function installPluginFromGit(url) {
     }
 
     if (fs.existsSync(targetDir)) {
-      return reject(new Error(`Plugin directory "${repoName}" already exists`));
+      // Says what the user can act on: this plugin is already installed (it
+      // is in the list below, possibly switched off), rather than naming an
+      // internal directory they never chose.
+      return reject(new Error(`This plugin is already installed (folder "${repoName}"). Find it in the installed list to enable, update or remove it.`));
     }
 
     // Clone into a temp directory so scanPlugins() never sees a partially-installed plugin
