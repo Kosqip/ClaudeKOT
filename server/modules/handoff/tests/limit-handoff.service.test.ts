@@ -207,6 +207,58 @@ test('a manual switch picks up the work with no limit reason and does not mark t
   });
 });
 
+test('switching back to a backend already used earlier in this conversation resumes that same session', async () => {
+  await withHandoffDatabase(async ({ projectPath, runtime, turns }) => {
+    sessionsDb.createAppSession('claude-session', 'claude', projectPath, 'Refactor');
+
+    const toCodex = await handoffSessionOnLimit(
+      { fromSessionId: 'claude-session', userId: 1, mode: 'manual', fallbackOrder: ['codex'] },
+      runtime,
+      async () => true,
+    );
+    assert.equal(toCodex.toProvider, 'codex');
+    const codexSessionId = toCodex.toSessionId;
+
+    const backToClaude = await handoffSessionOnLimit(
+      { fromSessionId: codexSessionId, userId: 1, mode: 'manual', fallbackOrder: ['claude'] },
+      runtime,
+      async () => true,
+    );
+
+    // The original Claude session is reused, not a third new one.
+    assert.equal(backToClaude.toSessionId, 'claude-session');
+    assert.match(turns[1].command, /continue here again/);
+    assert.equal(sessionsDb.getSessionById('claude-session')?.custom_name, 'Refactor');
+
+    // Switching to codex again finds the same codex session, too.
+    const toCodexAgain = await handoffSessionOnLimit(
+      { fromSessionId: 'claude-session', userId: 1, mode: 'manual', fallbackOrder: ['codex'] },
+      runtime,
+      async () => true,
+    );
+    assert.equal(toCodexAgain.toSessionId, codexSessionId);
+  });
+});
+
+test('an archived member is not silently resumed — a fresh session is started instead', async () => {
+  await withHandoffDatabase(async ({ projectPath, runtime }) => {
+    sessionsDb.createAppSession('claude-session', 'claude', projectPath);
+    const toCodex = await handoffSessionOnLimit(
+      { fromSessionId: 'claude-session', userId: 1, mode: 'manual', fallbackOrder: ['codex'] },
+      runtime,
+      async () => true,
+    );
+    sessionsDb.updateSessionIsArchived('claude-session', true);
+
+    const backToClaude = await handoffSessionOnLimit(
+      { fromSessionId: toCodex.toSessionId, userId: 1, mode: 'manual', fallbackOrder: ['claude'] },
+      runtime,
+      async () => true,
+    );
+    assert.notEqual(backToClaude.toSessionId, 'claude-session');
+  });
+});
+
 test('two exhausted backends do not hand a conversation back and forth', async () => {
   await withHandoffDatabase(async ({ projectPath, runtime }) => {
     sessionsDb.createAppSession('first', 'openrouter', projectPath);

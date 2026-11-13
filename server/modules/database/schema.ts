@@ -133,6 +133,17 @@ CREATE TABLE IF NOT EXISTS orchestrator_runs (
 );
 `;
 
+export const HANDOFF_LINKS_TABLE_SCHEMA_SQL = `
+CREATE TABLE IF NOT EXISTS handoff_links (
+    session_id TEXT PRIMARY KEY,
+    -- Shared by every session a handoff has ever moved this conversation
+    -- through; the id of the first one, chosen once and then carried along.
+    family_id TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+`;
+
 export const SESSIONS_TABLE_SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS sessions (
     session_id TEXT NOT NULL,

@@ -3,7 +3,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-import { sessionsDb, userPreferencesDb } from '@/modules/database/index.js';
+import { handoffLinksDb, sessionsDb, userPreferencesDb } from '@/modules/database/index.js';
 import { mapClaudeRateLimitType, providerAuthService, sessionsService } from '@/modules/providers/index.js';
 import type { ProviderRuntimeGateway } from '@/modules/websocket/index.js';
 import { broadcastToConnectedClients, startDetachedChatTurn } from '@/modules/websocket/index.js';
@@ -171,6 +171,21 @@ export function renderHistoryAsText(messages: Array<{ role?: 'user' | 'assistant
     .filter((message) => message.content)
     .map((message) => `${message.role === 'assistant' ? 'Assistant' : 'User'}: ${message.content}`)
     .join('\n\n');
+}
+
+/**
+ * Renders one or more backends' turns, in the order the conversation
+ * actually moved through them, each under a heading naming which backend
+ * produced it — used once a conversation has been handed off more than
+ * once, so a new (or resumed) session sees the whole history instead of
+ * only the hop it is being moved from. A single-segment call renders the
+ * same as `renderHistoryAsText` alone, just under one heading.
+ */
+export function renderFamilyHistoryAsText(segments: Array<{ provider: LLMProvider; text: string }>): string {
+  return segments
+    .filter((segment) => segment.text.trim())
+    .map((segment) => `### On ${segment.provider}\n\n${segment.text}`)
+    .join('\n\n---\n\n');
 }
 
 /**
@@ -383,16 +398,38 @@ export async function handoffSessionOnLimit(
     });
   }
 
-  const history = await sessionsService.fetchHistory(input.fromSessionId, { limit: null, offset: 0 });
-  const historyText = renderHistoryAsText(history.messages);
+  // This conversation's whole lineage: every session a handoff has ever
+  // moved it through (including, after this call, the one being created or
+  // resumed now), so a repeat visit to a backend already used earlier finds
+  // it, and whichever session ends up receiving the history gets the whole
+  // chain, not only the one hop it is being moved from.
+  const familyId = handoffLinksDb.getFamilyId(input.fromSessionId) ?? input.fromSessionId;
+  handoffLinksDb.link(input.fromSessionId, familyId, fromProvider);
 
-  const toSessionId = randomUUID();
-  sessionsDb.createAppSession(
-    toSessionId,
-    toProvider,
-    fromSession.project_path ?? '',
-    fromSession.custom_name ? `${fromSession.custom_name} (continued)` : undefined,
-  );
+  const existingMemberId = handoffLinksDb.findMember(familyId, toProvider);
+  const existingMember = existingMemberId ? sessionsDb.getSessionById(existingMemberId) : null;
+  // A resumed member keeps its own native history; an archived one is treated as gone rather than silently revived.
+  const resuming = Boolean(existingMember) && existingMember!.isArchived !== 1;
+
+  const toSessionId = resuming ? existingMember!.session_id : randomUUID();
+  if (!resuming) {
+    sessionsDb.createAppSession(
+      toSessionId,
+      toProvider,
+      fromSession.project_path ?? '',
+      fromSession.custom_name ? `${fromSession.custom_name} (continued)` : undefined,
+    );
+    handoffLinksDb.link(toSessionId, familyId, toProvider);
+  }
+
+  // Everyone else in the family (chronological, so earlier hops read before later ones) — the
+  // target's own native history already covers its own earlier turns when resuming.
+  const otherMembers = handoffLinksDb.listMembers(familyId).filter((member) => member.sessionId !== toSessionId);
+  const segments = await Promise.all(otherMembers.map(async (member) => ({
+    provider: member.provider as LLMProvider,
+    text: renderHistoryAsText((await sessionsService.fetchHistory(member.sessionId, { limit: null, offset: 0 })).messages),
+  })));
+  const historyText = renderFamilyHistoryAsText(segments);
 
   const contextFilePath = await writeHandoffContextFile(toSessionId, historyText);
 
@@ -401,6 +438,11 @@ export async function handoffSessionOnLimit(
   // can differ either way.
   const checkFolderFirst = 'The previous backend may have left this mid-task. Before redoing or building on any step, check the actual state of the working folder (for example `git status` and `git diff`) and trust it over the conversation.';
 
+  // A resumed session already has its own earlier turns natively; the file only adds what happened elsewhere meanwhile.
+  const readTheFile = resuming
+    ? `What happened on other backends since you were last active here is saved at ${contextFilePath} — read it, then continue from where YOU left off, folding in anything new.`
+    : `The prior conversation is saved at ${contextFilePath} — read it first, then continue from where it leaves off.`;
+
   const openingMessage = mode === 'standby'
     ? [
       `[Switched: the previous backend is close to ${REASON_LABEL[input.reason!]}.]`,
@@ -408,9 +450,11 @@ export async function handoffSessionOnLimit(
     ].join('\n\n')
     : [
       mode === 'manual'
-        ? '[Switched: the user asked for this conversation to continue on a different backend.]'
+        ? (resuming
+          ? '[Switched: the user asked for this conversation to continue here again.]'
+          : '[Switched: the user asked for this conversation to continue on a different backend.]')
         : `[Continued automatically: the previous backend hit ${REASON_LABEL[input.reason!]}.]`,
-      `The prior conversation is saved at ${contextFilePath} — read it first, then continue from where it leaves off.`,
+      readTheFile,
       checkFolderFirst,
     ].join('\n\n');
 
