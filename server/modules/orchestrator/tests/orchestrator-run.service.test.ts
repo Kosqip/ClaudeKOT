@@ -8,8 +8,11 @@ import { closeConnection, initializeDatabase, sessionsDb } from '@/modules/datab
 import {
   cancelOrchestratorRun,
   findLatestOrchestratorRun,
+  forgetOrchestratorRunsInMemory,
   getOrchestratorRun,
+  isOrchestratorManagedSession,
   resetOrchestratorRuns,
+  resumeOrchestratorRun,
   startOrchestratorRun,
 } from '@/modules/orchestrator/services/orchestrator-dispatch.service.js';
 import type { OrchestratorRunDependencies } from '@/modules/orchestrator/services/orchestrator-dispatch.service.js';
@@ -30,8 +33,13 @@ async function withOrchestrator(
     turns: Turn[];
     dependencies: OrchestratorRunDependencies;
     subtaskTurns: () => Turn[];
+    /** Backends at their usage limit, with when it resets. */
+    limits: Map<string, number>;
+    aborted: string[];
   }) => Promise<void>,
-  subtaskReply: (turn: Turn) => string | null | Promise<string | null> = (turn) => `did: ${turn.content.split('\n')[0]}`,
+  subtaskReply: (turn: Turn, limits: Map<string, number>) => string | null | Promise<string | null> = (turn) => `did: ${turn.content.split('\n')[0]}`,
+  /** Stands in for the origin session's backend; returning undefined takes the next scripted reply. */
+  leadReply: (turn: Turn, limits: Map<string, number>) => string | null | undefined = () => undefined,
 ): Promise<void> {
   const previousDatabasePath = process.env.DATABASE_PATH;
   const tempDirectory = await mkdtemp(path.join(os.tmpdir(), 'orchestrator-run-'));
@@ -44,20 +52,33 @@ async function withOrchestrator(
   const turns: Turn[] = [];
   const replies = new Map<string, string | null>();
   const script = [...orchestratorReplies];
+  const limits = new Map<string, number>();
+  const aborted: string[] = [];
   const dependencies: OrchestratorRunDependencies = {
     runTurn: async (input) => {
       const provider = sessionsDb.getSessionById(input.sessionId)?.provider ?? '?';
       const turn = { sessionId: input.sessionId, provider, content: input.content, options: input.options };
       turns.push(turn);
-      replies.set(input.sessionId, input.sessionId === 'lead' ? script.shift() ?? null : await subtaskReply(turn));
+      if (input.sessionId === 'lead') {
+        const own = leadReply(turn, limits);
+        replies.set('lead', own === undefined ? script.shift() ?? null : own);
+      } else if (/^Coordinating:/.test(sessionsDb.getSessionById(input.sessionId)?.custom_name ?? '')) {
+        // A backend that took the coordination over answers from the same script.
+        replies.set(input.sessionId, script.shift() ?? null);
+      } else {
+        replies.set(input.sessionId, await subtaskReply(turn, limits));
+      }
       return { started: true, error: null };
     },
     readLastReply: async (sessionId) => replies.get(sessionId) ?? null,
-    isProviderAvailable: () => true,
+    abortTurn: async (sessionId) => {
+      aborted.push(sessionId);
+    },
+    limitedUntil: (provider) => limits.get(provider) ?? null,
   };
 
   try {
-    await run({ turns, dependencies, subtaskTurns: () => turns.filter((turn) => turn.sessionId !== 'lead') });
+    await run({ turns, dependencies, limits, aborted, subtaskTurns: () => turns.filter((turn) => turn.sessionId !== 'lead') });
   } finally {
     closeConnection();
     if (previousDatabasePath === undefined) {
@@ -68,6 +89,13 @@ async function withOrchestrator(
     await rm(tempDirectory, { recursive: true, force: true });
   }
 }
+
+const NO_BACKENDS: OrchestratorRunDependencies = {
+  runTurn: async () => ({ started: false, error: 'unused' }),
+  readLastReply: async () => null,
+  abortTurn: async () => undefined,
+  limitedUntil: () => null,
+};
 
 const start = (dependencies: OrchestratorRunDependencies, maxRounds?: number) => startOrchestratorRun(
   { orchestratorSessionId: 'lead', userId: 1, task: 'Ship the feature', providerRoles: ROLES, maxRounds },
@@ -189,7 +217,7 @@ test('cancelling skips the subtasks that have not started and asks for no review
     assert.deepEqual(final.subtasks.map((subtask) => subtask.status), ['done', 'skipped']);
     assert.equal(turns.filter((turn) => turn.sessionId === 'lead').length, 1);
   }, () => {
-    cancelOrchestratorRun(runId);
+    void cancelOrchestratorRun(runId, NO_BACKENDS);
     return 'done';
   });
 });
@@ -203,5 +231,162 @@ test('a session coordinates one task at a time, and only with the orchestrator r
       () => startOrchestratorRun({ orchestratorSessionId: 'lead', userId: 1, task: 'x', providerRoles: { claude: 'hands' } }, dependencies),
       /orchestrator/,
     );
+  });
+});
+
+const ONE_BUILD = { subtasks: [{ title: 'Build', description: 'Write the code', role: 'hands', access: 'write' }] };
+const CLOSED = json({ status: 'done', summary: 'Shipped.' });
+const tick = () => new Promise((resolve) => setTimeout(resolve, 20));
+
+test('a subtask whose backend runs out of usage is passed to the next backend of the role chain and followed there', async () => {
+  await withOrchestrator([json(ONE_BUILD), CLOSED], async ({ dependencies, subtaskTurns }) => {
+    const { run, finished } = start(dependencies);
+    await finished;
+
+    const final = getOrchestratorRun(run.id)!;
+    assert.equal(final.phase, 'done');
+    assert.deepEqual(subtaskTurns().map((turn) => turn.provider), ['codex', 'claude']);
+    assert.match(subtaskTurns()[1].content, /already started on this and was cut off/);
+    assert.equal(final.subtasks[0].status, 'done');
+    assert.equal(final.subtasks[0].provider, 'claude');
+    assert.deepEqual(final.subtasks[0].movedFrom, ['codex']);
+    assert.equal(final.subtasks[0].sessionId, subtaskTurns()[1].sessionId);
+  }, (turn, limits) => {
+    if (turn.provider === 'codex') {
+      limits.set('codex', Date.now() + 3_600_000);
+      return null;
+    }
+    return 'built';
+  });
+});
+
+test('with every backend of a chain at its limit the run pauses, and goes on when asked', async () => {
+  await withOrchestrator([json(ONE_BUILD), CLOSED], async ({ dependencies, limits, subtaskTurns }) => {
+    const { run, finished } = start(dependencies);
+    await tick();
+
+    const paused = getOrchestratorRun(run.id)!;
+    assert.equal(paused.phase, 'paused');
+    assert.equal(paused.pauseReason, 'limit');
+    assert.equal(paused.resumeAt, new Date(limits.get('codex')!).toISOString());
+    assert.equal(paused.waitingFor, 'codex');
+    assert.equal(subtaskTurns().length, 0);
+    assert.equal(isOrchestratorManagedSession('lead'), true);
+
+    limits.clear();
+    resumeOrchestratorRun(run.id, dependencies);
+    await finished;
+    const final = getOrchestratorRun(run.id)!;
+    assert.equal(final.phase, 'done');
+    assert.equal(final.resumeAt, undefined);
+    assert.deepEqual(subtaskTurns().map((turn) => turn.provider), ['codex']);
+    assert.equal(isOrchestratorManagedSession('lead'), false);
+  }, undefined, (turn, limits) => {
+    // The plan is given, and from then on both agent backends are out.
+    if (/Break the task/.test(turn.content)) {
+      limits.set('claude', Date.now() + 7_200_000);
+      limits.set('codex', Date.now() + 3_600_000);
+    }
+    return undefined;
+  });
+});
+
+test('when the orchestrator runs out of usage the next backend of its chain takes the coordination over', async () => {
+  await withOrchestrator([json(ONE_BUILD), CLOSED], async ({ turns, dependencies }) => {
+    const { run, finished } = start(dependencies);
+    await finished;
+
+    const final = getOrchestratorRun(run.id)!;
+    assert.equal(final.phase, 'done');
+    assert.equal(final.summary, 'Shipped.');
+    assert.equal(final.coordinatorProvider, 'codex');
+    assert.equal(final.orchestratorSessionId, 'lead');
+    const takeover = turns.find((turn) => turn.sessionId === final.coordinatorSessionId)!;
+    assert.match(takeover.content, /^You are taking over the coordination/);
+    assert.match(takeover.content, /Ship the feature/);
+    assert.match(takeover.content, /built/);
+  }, () => 'built', (turn, limits) => {
+    if (/have finished/.test(turn.content)) {
+      limits.set('claude', Date.now() + 3_600_000);
+      return null;
+    }
+    return undefined;
+  });
+});
+
+test('stopping a run stops the turn it has going', async () => {
+  let release: (reply: string | null) => void = () => undefined;
+  await withOrchestrator([json(ONE_BUILD)], async ({ turns, dependencies, aborted, subtaskTurns }) => {
+    const { run, finished } = start(dependencies);
+    await tick();
+    assert.equal(subtaskTurns().length, 1);
+
+    const stopping = cancelOrchestratorRun(run.id, { ...dependencies, abortTurn: async (sessionId) => {
+      await dependencies.abortTurn(sessionId);
+      release(null);
+    } });
+    await stopping;
+    await finished;
+
+    const final = getOrchestratorRun(run.id)!;
+    assert.deepEqual(aborted, [subtaskTurns()[0].sessionId]);
+    assert.equal(final.phase, 'cancelled');
+    assert.equal(final.subtasks[0].status, 'skipped');
+    assert.equal(turns.filter((turn) => turn.sessionId === 'lead').length, 1);
+  }, () => new Promise((resolve) => {
+    release = resolve;
+  }));
+});
+
+test('a run cut off by a restart comes back paused and, continued, redoes only what has no result', async () => {
+  const plan = { subtasks: [
+    { title: 'First', description: 'Do the first part', role: 'hands', access: 'write' },
+    { title: 'Second', description: 'Do the second part', role: 'hands', access: 'write' },
+  ] };
+  let release: (reply: string | null) => void = () => undefined;
+  let hang = true;
+  await withOrchestrator([json(plan), CLOSED], async ({ dependencies, subtaskTurns }) => {
+    const { run } = start(dependencies);
+    await tick();
+    assert.equal(subtaskTurns().length, 2);
+
+    // The process "dies" with the second subtask still going.
+    forgetOrchestratorRunsInMemory();
+    const restored = getOrchestratorRun(run.id)!;
+    assert.equal(restored.phase, 'paused');
+    assert.equal(restored.pauseReason, 'restart');
+    assert.deepEqual(restored.subtasks.map((subtask) => subtask.status), ['done', 'pending']);
+
+    hang = false;
+    await resumeOrchestratorRun(run.id, dependencies)!.finished;
+    const final = getOrchestratorRun(run.id)!;
+    assert.equal(final.phase, 'done');
+    assert.deepEqual(subtaskTurns().map((turn) => turn.content.split('\n')[0]),
+      ['Do the first part', 'Do the second part', 'Do the second part']);
+    assert.match(subtaskTurns()[2].content, /already started on this and was cut off/);
+    release(null);
+  }, (turn) => (hang && /second part/.test(turn.content)
+    ? new Promise((resolve) => {
+      release = resolve;
+    })
+    : 'ok'));
+});
+
+test('file work is not handed to a text model that only stands in for the role', async () => {
+  await withOrchestrator([json(ONE_BUILD), CLOSED], async ({ dependencies, subtaskTurns }) => {
+    const { run, finished } = startOrchestratorRun(
+      { orchestratorSessionId: 'lead', userId: 1, task: 'Ship the feature', providerRoles: { claude: 'orchestrator', codex: 'hands', openrouter: 'hands' }, preferredOrder: ['codex', 'openrouter'] },
+      dependencies,
+    );
+    await finished;
+    // Codex ran out; the text model is passed over and the orchestrator's backend builds.
+    assert.deepEqual(subtaskTurns().map((turn) => turn.provider), ['codex', 'claude']);
+    assert.equal(getOrchestratorRun(run.id)!.phase, 'done');
+  }, (turn, limits) => {
+    if (turn.provider === 'codex') {
+      limits.set('codex', Date.now() + 3_600_000);
+      return null;
+    }
+    return 'built';
   });
 });

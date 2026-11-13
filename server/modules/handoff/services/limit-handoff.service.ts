@@ -63,17 +63,42 @@ export function markProviderLimited(provider: LLMProvider, untilMs: number = Dat
   limitedProviders.set(provider, untilMs);
 }
 
-/** True while a recorded limit on `provider` has not yet reset. Exported for this module's tests. */
+/** True while a recorded limit on `provider` has not yet reset. Exported for this module's tests and the orchestrator. */
 export function isProviderLimited(provider: LLMProvider, now: number = Date.now()): boolean {
+  return getProviderLimitedUntil(provider, now) !== null;
+}
+
+/**
+ * When a recorded limit on `provider` resets (ms since epoch), or null when
+ * it is free to take work. Used by the orchestrator module to wait for a
+ * backend instead of failing a task when every candidate is at its limit,
+ * and by the diagnostics report.
+ */
+export function getProviderLimitedUntil(provider: LLMProvider, now: number = Date.now()): number | null {
   const until = limitedProviders.get(provider);
   if (until === undefined) {
-    return false;
+    return null;
   }
   if (until <= now) {
     limitedProviders.delete(provider);
-    return false;
+    return null;
   }
-  return true;
+  return until;
+}
+
+/**
+ * Records a limit reported by a turn in `sessionId` without moving the
+ * session anywhere. Used by `server/index.ts` for sessions the orchestrator
+ * runs itself: it reassigns the work along the role's own chain, so the
+ * generic move to a fallback must not also happen.
+ */
+export function recordSessionProviderLimit(sessionId: string, resetsAt?: string): void {
+  const session = sessionsDb.getSessionById(sessionId);
+  if (!session) {
+    return;
+  }
+  const resetsAtMs = resetsAt ? Date.parse(resetsAt) : Number.NaN;
+  markProviderLimited(session.provider as LLMProvider, Number.isFinite(resetsAtMs) && resetsAtMs > Date.now() ? resetsAtMs : undefined);
 }
 
 /** Clears the in-memory claim and limit records. Used only by this module's tests. */

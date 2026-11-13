@@ -317,6 +317,7 @@ export const api = {
     run: (runId: string) => get(`/api/orchestrator/runs/${encodeURIComponent(runId)}`),
     latestRun: (sessionId: string) => get(`/api/orchestrator/runs${query({ sessionId })}`),
     cancel: (runId: string) => post(`/api/orchestrator/runs/${encodeURIComponent(runId)}/cancel`, {}),
+    resume: (runId: string) => post(`/api/orchestrator/runs/${encodeURIComponent(runId)}/resume`, {}),
   },
 
   // Moves a session's conversation to the next backend in the user's
@@ -326,6 +327,10 @@ export const api = {
       post('/api/handoff/trigger', body),
   },
 
+  // The plain-text diagnostics report shown in Settings → About.
+  diagnostics: {
+    report: () => get('/api/diagnostics/report'),
+  },
   taskRouter: {
     dispatch: (body: { projectPath: string; content: string; explicitTag?: string }) =>
       post('/api/task-router/dispatch', body),

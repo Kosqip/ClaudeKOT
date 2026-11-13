@@ -1967,14 +1967,16 @@ export type OrchestratorSubtask = {
   access: OrchestratorSubtaskAccess;
 };
 
-/** Where one subtask of a run stands. `skipped`: no backend holds its role, or the run was cancelled before its turn. */
+/** Where one subtask of a run stands. `skipped`: no backend can take its role, or the run was stopped before or during its turn. */
 export type OrchestratorSubtaskStatus = 'pending' | 'running' | 'done' | 'failed' | 'skipped';
 
 /**
  * One subtask of a run as the UI shows it: the plan entry, the backend and
  * session it was given to, how it ended, and the round of the run it
  * belongs to. Its full reply lives in its own session; `error` says why a
- * failed or skipped one did not produce a result.
+ * failed or skipped one did not produce a result. `movedFrom` lists the
+ * backends that started it and ran out of usage before `provider` took it
+ * over.
  */
 export type OrchestratorSubtaskResult = {
   title: string;
@@ -1985,7 +1987,17 @@ export type OrchestratorSubtaskResult = {
   provider?: LLMProvider;
   sessionId?: string;
   error?: string;
+  movedFrom?: LLMProvider[];
 };
+
+/**
+ * What an orchestrated task is doing now. `paused` is a task that is not
+ * lost but not moving: every backend that could take the next step is at
+ * its usage limit (`pauseReason: 'limit'`, continues by itself at
+ * `resumeAt`), or the server was restarted mid-task (`'restart'`, continues
+ * when the user asks).
+ */
+export type OrchestratorRunPhase = 'planning' | 'running' | 'reviewing' | 'paused' | 'done' | 'failed' | 'cancelled';
 
 /**
  * One orchestrated task from start to finish. The orchestrator plans, the
@@ -1993,15 +2005,28 @@ export type OrchestratorSubtaskResult = {
  * closes the task with a summary or asks for another round of subtasks —
  * up to `maxRounds`. `phase` is what is happening now; `summary` is the
  * orchestrator's closing word once `phase` is `done`.
+ *
+ * `orchestratorSessionId` is the session the task was started from and
+ * never changes. `coordinatorProvider`/`coordinatorSessionId` name the
+ * backend and session that currently plan and review — the same session
+ * until its backend runs out of usage and the next one in the orchestrator
+ * chain takes the task over.
  */
 export type OrchestratorRun = {
   id: string;
   orchestratorSessionId: string;
   task: string;
-  phase: 'planning' | 'running' | 'reviewing' | 'done' | 'failed' | 'cancelled';
+  phase: OrchestratorRunPhase;
   round: number;
   maxRounds: number;
   subtasks: OrchestratorSubtaskResult[];
+  coordinatorProvider?: LLMProvider;
+  coordinatorSessionId?: string;
+  pauseReason?: 'limit' | 'restart';
+  /** The backend the task waits for while paused on a limit. */
+  waitingFor?: LLMProvider;
+  /** When a limit pause ends by itself (ISO). */
+  resumeAt?: string;
   summary?: string;
   error?: string;
 };

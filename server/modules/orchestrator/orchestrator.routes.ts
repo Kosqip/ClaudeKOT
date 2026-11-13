@@ -2,12 +2,14 @@ import express from 'express';
 import type { Request, Response } from 'express';
 
 import { userPreferencesDb } from '@/modules/database/index.js';
+import { readStoredFallbackOrder } from '@/modules/handoff/index.js';
 import {
   cancelOrchestratorRun,
   createOrchestratorRunDependencies,
   findLatestOrchestratorRun,
   getOrchestratorRun,
   ORCHESTRATOR_MAX_ROUNDS_LIMIT,
+  resumeOrchestratorRun,
   startOrchestratorRun,
 } from '@/modules/orchestrator/services/orchestrator-dispatch.service.js';
 import { providerRuntimeService } from '@/modules/providers/index.js';
@@ -105,6 +107,7 @@ router.post(
         userId,
         task: readTask(body.task),
         providerRoles: readStoredProviderRoles(userId),
+        preferredOrder: readStoredFallbackOrder(userId),
         maxRounds: readMaxRounds(body.maxRounds),
       },
       createOrchestratorRunDependencies(providerRuntimeService),
@@ -131,11 +134,22 @@ router.get(
   }),
 );
 
-/** Stops a run from starting anything further (see `cancelOrchestratorRun`). */
+/** Stops a run and every turn it has going (see `cancelOrchestratorRun`). */
 router.post(
   '/runs/:runId/cancel',
   asyncHandler(async (req: Request, res: Response) => {
-    res.json(createApiSuccessResponse({ run: requireRun(cancelOrchestratorRun(String(req.params.runId))) }));
+    const run = await cancelOrchestratorRun(String(req.params.runId), createOrchestratorRunDependencies(providerRuntimeService));
+    res.json(createApiSuccessResponse({ run: requireRun(run) }));
+  }),
+);
+
+/** Sets a paused or failed run going again (see `resumeOrchestratorRun`). */
+router.post(
+  '/runs/:runId/resume',
+  asyncHandler(async (req: Request, res: Response) => {
+    const resumed = requireRun(resumeOrchestratorRun(String(req.params.runId), createOrchestratorRunDependencies(providerRuntimeService)));
+    void resumed.finished;
+    res.json(createApiSuccessResponse({ run: resumed.run }));
   }),
 );
 

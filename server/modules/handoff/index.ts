@@ -26,7 +26,11 @@ export { readStoredFallbackOrder, suggestHandoff } from '@/modules/handoff/servi
 
 // isProviderLimited: lets the orchestrator module pass over a backend that
 // is at its usage limit when it picks who gets a subtask.
-export { isProviderLimited } from '@/modules/handoff/services/limit-handoff.service.js';
+// getProviderLimitedUntil: when that limit resets, so the orchestrator can wait
+// for it (also read by the diagnostics report). recordSessionProviderLimit:
+// used by server/index.ts to note a limit hit in an orchestrator-run session
+// without moving that session.
+export { getProviderLimitedUntil, isProviderLimited, recordSessionProviderLimit } from '@/modules/handoff/services/limit-handoff.service.js';
 
 // Mounted at /api/handoff in server/index.ts, behind the same
 // authenticateToken middleware every other provider-facing route uses.

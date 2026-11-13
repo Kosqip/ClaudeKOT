@@ -532,7 +532,8 @@
         "reviewing": "Checking the results…",
         "done": "Done",
         "failed": "Failed",
-        "cancelled": "Stopped"
+        "cancelled": "Stopped",
+        "paused": "Paused"
       },
       "status": {
         "pending": "waiting",
@@ -548,7 +549,12 @@
       "roles": {
         "hands": "hands",
         "routine": "routine"
-      }
+      },
+      "resume": "Continue now",
+      "pausedLimit": "Every backend that could take the next step is at its usage limit. The task goes on by itself when {{provider}}'s limit resets — around {{time}}.",
+      "pausedRestart": "The server was restarted in the middle of the task. Finished parts are kept — press \"Continue now\" and only the rest is done.",
+      "coordinatorMoved": "{{provider}} now leads the task: the previous orchestrator ran out of usage.",
+      "movedFrom": "taken over from {{providers}} after its limit"
     }
   }
 }

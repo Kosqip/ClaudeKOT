@@ -21,7 +21,9 @@ const STATUS_DOT: Record<OrchestratorSubtaskResult['status'], string> = {
  * hold the "orchestrator" role) to coordinate, and follows the run: the
  * plan's subtasks round by round — each with its role, access, backend and
  * live status, and a link to its own session — then the orchestrator's
- * closing summary. A run in progress can be cancelled. Rendered by the chat
+ * closing summary. A run in progress can be stopped (its running turns are
+ * stopped too); a run paused on a usage limit shows when it goes on and can
+ * be continued at once, as can one that failed or was cut off by a restart. Rendered by the chat
  * module as one of the tools under the composer, only when the current
  * session's provider has the orchestrator role.
  */
@@ -35,10 +37,12 @@ export function OrchestratorPlanPanel({
   const { t } = useTranslation('chat');
   const [task, setTask] = useState('');
   const [maxRounds, setMaxRounds] = useState(2);
-  const { run, isStarting, error, start, cancel } = useOrchestratorPlan(sessionId);
+  const { run, isStarting, error, start, cancel, resume } = useOrchestratorPlan(sessionId);
 
   const active = isOrchestratorRunActive(run);
   const canStart = task.trim().length > 0 && !isStarting && !active;
+  const canResume = run?.phase === 'paused' || run?.phase === 'failed';
+  const coordinatorMoved = Boolean(run?.coordinatorSessionId && run.coordinatorSessionId !== run.orchestratorSessionId);
   const rounds = run ? [...new Set(run.subtasks.map((subtask) => subtask.round))] : [];
 
   return (
@@ -64,6 +68,15 @@ export function OrchestratorPlanPanel({
             ))}
           </select>
         </label>
+        {canResume ? (
+          <button
+            type="button"
+            onClick={() => void resume()}
+            className="rounded-md border border-border px-3 py-1.5 text-sm"
+          >
+            {t('backendTools.orchestrator.resume')}
+          </button>
+        ) : null}
         {active ? (
           <button
             type="button"
@@ -89,6 +102,28 @@ export function OrchestratorPlanPanel({
           <p className="font-medium" role="status">
             {t(`backendTools.orchestrator.phase.${run.phase}`, { round: run.round, maxRounds: run.maxRounds })}
           </p>
+          {run.phase === 'paused' ? (
+            <p className="text-muted-foreground">
+              {run.pauseReason === 'limit'
+                ? t('backendTools.orchestrator.pausedLimit', {
+                  provider: run.waitingFor ? LLM_PROVIDER_NAMES[run.waitingFor] : '',
+                  time: run.resumeAt ? new Date(run.resumeAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '',
+                })
+                : t('backendTools.orchestrator.pausedRestart')}
+            </p>
+          ) : null}
+          {coordinatorMoved && run.coordinatorProvider ? (
+            <p className="flex items-center justify-between gap-2 text-muted-foreground">
+              <span>{t('backendTools.orchestrator.coordinatorMoved', { provider: LLM_PROVIDER_NAMES[run.coordinatorProvider] })}</span>
+              <button
+                type="button"
+                onClick={() => onOpenSubtaskSession(run.coordinatorSessionId!)}
+                className="shrink-0 text-primary underline"
+              >
+                {t('backendTools.open')}
+              </button>
+            </p>
+          ) : null}
           {rounds.map((round) => (
             <div key={round} className="flex flex-col gap-1">
               {run.maxRounds > 1 ? (
@@ -110,6 +145,11 @@ export function OrchestratorPlanPanel({
                         {subtask.provider ? ` · ${LLM_PROVIDER_NAMES[subtask.provider]}` : ''}
                         {' · '}
                         {t(`backendTools.orchestrator.status.${subtask.status}`)}
+                        {subtask.movedFrom?.length ? (
+                          <span className="text-muted-foreground">
+                            {` (${t('backendTools.orchestrator.movedFrom', { providers: subtask.movedFrom.map((provider) => LLM_PROVIDER_NAMES[provider]).join(', ') })})`}
+                          </span>
+                        ) : null}
                         {subtask.error ? <span className="text-muted-foreground">{` (${subtask.error})`}</span> : null}
                       </span>
                     </span>

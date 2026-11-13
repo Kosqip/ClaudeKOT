@@ -120,6 +120,19 @@ CREATE TABLE IF NOT EXISTS scheduled_messages (
 );
 `;
 
+export const ORCHESTRATOR_RUNS_TABLE_SCHEMA_SQL = `
+CREATE TABLE IF NOT EXISTS orchestrator_runs (
+    id TEXT PRIMARY KEY,
+    -- The session the task was started from; its panel looks runs up by it.
+    session_id TEXT NOT NULL,
+    -- The whole run as JSON (plan, reports, who holds which role), so a
+    -- paused or interrupted task can be picked up after a server restart.
+    state TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+`;
+
 export const SESSIONS_TABLE_SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS sessions (
     session_id TEXT NOT NULL,

@@ -28,6 +28,7 @@ import {
     shouldHandoffForRateLimitStatus,
     suggestHandoff,
     tryClaimHandoff,
+    recordSessionProviderLimit,
 } from '@/modules/handoff/index.js';
 
 import { getConnectableHost } from '../shared/networkHosts.js';
@@ -56,8 +57,14 @@ import {
 import providerRoutes from './modules/providers/provider.routes.js';
 import { mixRoutes } from './modules/mix/index.js';
 import { handoffRoutes } from './modules/handoff/index.js';
-import { orchestratorRoutes } from './modules/orchestrator/index.js';
+import {
+    createOrchestratorRunDependencies,
+    isOrchestratorManagedSession,
+    orchestratorRoutes,
+    restoreOrchestratorRuns,
+} from './modules/orchestrator/index.js';
 import { taskRouterRoutes } from './modules/task-router/index.js';
+import { createDiagnosticsRouter, installDiagnosticsLogCapture } from './modules/diagnostics/index.js';
 import { voiceRoutes } from './modules/voice/index.js';
 import {
     closeScheduledMessageDispatcher,
@@ -96,6 +103,8 @@ const systemRoutes = createSystemModule({
     installMode,
     isPlatform: IS_PLATFORM,
 });
+// From here on the console's recent lines are kept for the diagnostics report.
+installDiagnosticsLogCapture();
 console.log('SERVER_PORT from env:', process.env.SERVER_PORT);
 
 const app = express();
@@ -153,6 +162,12 @@ const pendingHandoffSuggestions = new Map<string, PendingHandoffSuggestion>();
  * surfaced as a second error on top of the turn that already failed.
  */
 function startAutoHandoff(request: AutoHandoffRequest): void {
+    // A session an orchestrated task works in is not moved: the limit is
+    // noted and the task itself passes the work along its role chain.
+    if (isOrchestratorManagedSession(request.sessionId)) {
+        recordSessionProviderLimit(request.sessionId, request.resetsAt);
+        return;
+    }
     if (!tryClaimHandoff(request.sessionId, 'continue')) {
         return;
     }
@@ -242,6 +257,9 @@ function handleRateLimitStatusForAutoHandoff(input: { provider: LLMProvider; ses
  * later turn can offer again.
  */
 function offerHandoff(pending: PendingHandoffSuggestion): void {
+    if (isOrchestratorManagedSession(pending.sessionId)) {
+        return;
+    }
     if (!tryClaimHandoff(pending.sessionId, 'standby')) {
         return;
     }
@@ -423,6 +441,7 @@ app.use('/api/mix', authenticateToken, mixRoutes);
 app.use('/api/handoff', authenticateToken, handoffRoutes);
 app.use('/api/orchestrator', authenticateToken, orchestratorRoutes);
 app.use('/api/task-router', authenticateToken, taskRouterRoutes);
+app.use('/api/diagnostics', authenticateToken, createDiagnosticsRouter({ getVersion: () => RUNNING_VERSION, installMode }));
 app.use('/api/scheduled-messages', authenticateToken, scheduledMessagesRoutes);
 
 // Agent API Routes (uses API key authentication)
@@ -611,6 +630,8 @@ async function startServer() {
             // Sends anything that came due while the server was not running,
             // then keeps polling.
             initializeScheduledMessageDispatcher(providerRuntimeService);
+            // Orchestrated tasks that were waiting for a usage limit go back to waiting.
+            restoreOrchestratorRuns(createOrchestratorRunDependencies(providerRuntimeService));
 
             // Start server-side plugin processes for enabled plugins
             startEnabledPluginServers().catch(err => {

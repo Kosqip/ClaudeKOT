@@ -13,6 +13,8 @@ export type OrchestratorSubtaskResult = {
   provider?: LLMProvider;
   sessionId?: string;
   error?: string;
+  /** Backends that began the subtask and ran out of usage before `provider` took it over. */
+  movedFrom?: LLMProvider[];
 };
 
 /** One orchestrated task from start to finish (mirrors the server's `OrchestratorRun`). */
@@ -20,19 +22,25 @@ export type OrchestratorRun = {
   id: string;
   orchestratorSessionId: string;
   task: string;
-  phase: 'planning' | 'running' | 'reviewing' | 'done' | 'failed' | 'cancelled';
+  phase: 'planning' | 'running' | 'reviewing' | 'paused' | 'done' | 'failed' | 'cancelled';
   round: number;
   maxRounds: number;
   subtasks: OrchestratorSubtaskResult[];
+  /** The backend and session that plan and review now; they change when the orchestrator's backend runs out of usage. */
+  coordinatorProvider?: LLMProvider;
+  coordinatorSessionId?: string;
+  pauseReason?: 'limit' | 'restart';
+  waitingFor?: LLMProvider;
+  resumeAt?: string;
   summary?: string;
   error?: string;
 };
 
 const POLL_INTERVAL_MS = 2000;
 
-/** True while the server is still working on the run. */
+/** True while the run is not over: working, or paused and able to go on. */
 export function isOrchestratorRunActive(run: OrchestratorRun | null): boolean {
-  return run?.phase === 'planning' || run?.phase === 'running' || run?.phase === 'reviewing';
+  return run?.phase === 'planning' || run?.phase === 'running' || run?.phase === 'reviewing' || run?.phase === 'paused';
 }
 
 async function readRun(response: Response): Promise<OrchestratorRun | null> {
@@ -125,5 +133,17 @@ export function useOrchestratorPlan(sessionId: string) {
     }
   }, [runId]);
 
-  return { run, isStarting, error, start, cancel };
+  const resume = useCallback(async (): Promise<void> => {
+    if (!runId) {
+      return;
+    }
+    try {
+      setError(null);
+      setRun(await readRun(await api.orchestrator.resume(runId)));
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'The orchestrator request failed.');
+    }
+  }, [runId]);
+
+  return { run, isStarting, error, start, cancel, resume };
 }

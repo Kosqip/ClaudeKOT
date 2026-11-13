@@ -77,6 +77,16 @@ function buildTextOnlyRule(textOnlyRoles: Array<'hands' | 'routine'>): string[] 
 }
 
 /** The one follow-up sent when a plan or review reply could not be parsed: names the problem and repeats the required shape. */
+/**
+ * Put in front of a plan or review request when it goes to a backend that
+ * takes the coordination over in a new session (the previous orchestrator
+ * ran out of usage): the request itself already carries the task and the
+ * reports, this only says why it arrives without a conversation before it.
+ */
+export function buildCoordinatorTakeoverNote(): string {
+  return 'You are taking over the coordination of a task from another AI backend that ran out of its usage limit. Everything you need is in this message; the earlier conversation is not available to you.\n\n';
+}
+
 export function buildPlanRetryPrompt(problem: string, shape: 'plan' | 'review'): string {
   return [
     `Your last reply could not be used: ${problem}`,
@@ -116,9 +126,14 @@ export function buildSubtaskPrompt(
   earlier: SubtaskReport[],
   /** The receiving backend can only work from text (see `isTextOnlyProvider`). */
   textOnly = false,
+  /** Another backend already began this subtask and was cut off (usage limit, restart). */
+  takenOver = false,
 ): string {
   return [
     subtask.description,
+    ...(takenOver && !textOnly
+      ? ['', 'Another backend already started on this and was cut off before finishing, so some of it may be half-done. Check the actual state of the project folder first (for example `git status` and `git diff`) and continue from there instead of starting over.']
+      : []),
     ...(textOnly
       ? ['', 'You have no access to files or commands here: work from the text in this message alone and give your result as text. If something essential is missing, do the part you can and say exactly what is missing.']
       : []),
@@ -323,14 +338,36 @@ export function buildSubtaskTurnOptions(provider: LLMProvider, access: Orchestra
 }
 
 /**
- * Picks the backend a subtask goes to. First choice is a backend the user
- * gave the subtask's own role, in `PROVIDER_RESOLUTION_ORDER`. When nobody
- * holds that role the work is not dropped: a `routine` subtask goes to a
- * `hands` backend, and failing that — or for a `hands` subtask with no
- * `hands` backend — to the orchestrator's own backend, in a fresh session.
- * A user with one subscription and one API key (Claude as orchestrator, a
- * free model for routine) still gets every subtask done this way. Returns
- * `null` only when no backend has any of these roles.
+ * The backends that may do a role's work, best first — the role's chain.
+ * First come the backends the user gave that very role; after them the
+ * substitutes: `hands` work may fall to an `orchestrator` backend, `routine`
+ * work to `hands` and then `orchestrator`, and coordinating
+ * (`orchestrator`) to a `hands` backend. Within one role the user's own
+ * backend order (`preferredOrder`, their handoff fallback order) decides,
+ * then `PROVIDER_RESOLUTION_ORDER`.
+ *
+ * The chain only names who may stand in; the caller takes the first one
+ * that is not at its usage limit, so a role goes back to its first choice
+ * by itself once that backend's limit resets.
+ */
+export function listRoleCandidates(
+  role: ProviderRole,
+  providerRoles: Partial<Record<LLMProvider, ProviderRole>>,
+  preferredOrder: LLMProvider[] = [],
+): LLMProvider[] {
+  const order = [...new Set([...preferredOrder, ...PROVIDER_RESOLUTION_ORDER])];
+  const chainRoles: ProviderRole[] = role === 'routine'
+    ? ['routine', 'hands', 'orchestrator']
+    : role === 'hands' ? ['hands', 'orchestrator'] : ['orchestrator', 'hands'];
+  return chainRoles.flatMap((chainRole) => order.filter((provider) => providerRoles[provider] === chainRole));
+}
+
+/**
+ * Picks the backend a subtask goes to: the first of the role's chain
+ * (`listRoleCandidates`) that can take work now. A user with one
+ * subscription and one API key (Claude as orchestrator, a free model for
+ * routine) still gets every subtask done this way. Returns `null` only when
+ * no backend has any role of the chain.
  */
 export function resolveSubtaskProvider(
   role: ProviderRole,
@@ -338,14 +375,7 @@ export function resolveSubtaskProvider(
   /** Lets the caller pass over a backend that cannot take work right now (at its usage limit). */
   isAvailable: (provider: LLMProvider) => boolean = () => true,
 ): LLMProvider | null {
-  const fallbackRoles: ProviderRole[] = role === 'routine' ? ['routine', 'hands', 'orchestrator'] : [role, 'orchestrator'];
-  for (const candidateRole of [...new Set(fallbackRoles)]) {
-    const holders = PROVIDER_RESOLUTION_ORDER.filter((provider) => providerRoles[provider] === candidateRole);
-    // A holder at its limit is still better than none: its session then hands off like any other.
-    const chosen = holders.find(isAvailable) ?? holders[0];
-    if (chosen) {
-      return chosen;
-    }
-  }
-  return null;
+  const candidates = listRoleCandidates(role, providerRoles);
+  // A candidate at its limit is still better than none.
+  return candidates.find(isAvailable) ?? candidates[0] ?? null;
 }

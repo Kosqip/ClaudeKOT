@@ -536,7 +536,7 @@
     },
     "providerRoles": {
       "title": "Backend roles",
-      "description": "Used by \"Orchestrator\" in the chat: the orchestrator plans the work, \"hands\" and \"routine\" backends receive the subtasks.",
+      "description": "Used by \"Orchestrator\" in the chat: the orchestrator plans the work, \"hands\" and \"routine\" backends receive the subtasks. When a backend runs out of usage the next one takes its work: the orchestrator stands in for \"hands\"; \"hands\", then the orchestrator, for \"routine\"; \"hands\" for the orchestrator. Between backends with the same role the handoff order above decides. A role returns by itself once the limit resets. File work is never given to a text model: with nobody to stand in, the task waits for the limit to reset.",
       "roles": {
         "none": "No role",
         "orchestrator": "Orchestrator",
@@ -979,6 +979,12 @@
     "teamManagementTitle": "Team Management",
     "teamManagementDescription": "Multiple users, role-based access, and shared projects for your team.",
     "licensed": "Licensed under AGPL-3.0",
-    "proCta": "Available with CloudCLI Pro"
+    "proCta": "Available with CloudCLI Pro",
+    "diagnosticsTitle": "Diagnostics report",
+    "diagnosticsDescription": "When something does not work, save this report and send it to whoever is helping you. It holds versions, the state of each backend, the role settings, the steps of the latest orchestrated tasks and the server's recent log lines. It contains no keys, tokens, e-mail addresses or conversation text.",
+    "diagnosticsDownload": "Save report",
+    "diagnosticsCopy": "Copy",
+    "diagnosticsCopied": "Copied",
+    "diagnosticsFailed": "The report could not be built"
   }
 }
