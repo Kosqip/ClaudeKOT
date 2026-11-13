@@ -14,6 +14,7 @@ import {
   pickFallbackProvider,
   releaseHandoffClaim,
   renderHistoryAsText,
+  truncateForInlineContext,
   resetHandoffState,
   suggestHandoff,
   tryClaimHandoff,
@@ -204,6 +205,33 @@ test('a manual switch picks up the work with no limit reason and does not mark t
     assert.match(turns[0].command, /the user asked for this conversation to continue/);
     assert.match(turns[0].command, /continue from where it leaves off/);
     assert.equal(isProviderLimited('openrouter'), false);
+  });
+});
+
+test('truncateForInlineContext keeps the tail and leaves a short history untouched', () => {
+  assert.equal(truncateForInlineContext('short'), 'short');
+  const long = 'x'.repeat(13000) + 'TAIL-MARKER';
+  const truncated = truncateForInlineContext(long);
+  assert.ok(truncated.length < long.length);
+  assert.ok(truncated.endsWith('TAIL-MARKER'));
+  assert.match(truncated, /cut/);
+});
+
+test('a switch to a text-only target gets the history inlined in the message instead of a file it cannot read', async () => {
+  await withHandoffDatabase(async ({ projectPath, runtime, turns }) => {
+    sessionsDb.createAppSession('from-session', 'claude', projectPath, 'Refactor');
+
+    const result = await handoffSessionOnLimit(
+      { fromSessionId: 'from-session', userId: 1, mode: 'manual', fallbackOrder: ['openrouter'] },
+      runtime,
+      async () => true,
+    );
+
+    assert.equal(result.toProvider, 'openrouter');
+    // No "saved at <path> — read it" pointer, and no folder-check instruction (openrouter has no folder).
+    assert.doesNotMatch(turns[0].command, /saved at/);
+    assert.doesNotMatch(turns[0].command, /git status/);
+    assert.match(turns[0].command, /continue from where it leaves off/);
   });
 });
 

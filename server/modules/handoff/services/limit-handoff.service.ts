@@ -7,7 +7,7 @@ import { handoffLinksDb, sessionsDb, userPreferencesDb } from '@/modules/databas
 import { mapClaudeRateLimitType, providerAuthService, sessionsService } from '@/modules/providers/index.js';
 import type { ProviderRuntimeGateway } from '@/modules/websocket/index.js';
 import { broadcastToConnectedClients, startDetachedChatTurn } from '@/modules/websocket/index.js';
-import { AppError } from '@/shared/utils.js';
+import { AppError, isTextOnlyProvider } from '@/shared/utils.js';
 import type {
   HandoffSuggestion,
   LimitHandoffMode,
@@ -190,13 +190,14 @@ export function renderFamilyHistoryAsText(segments: Array<{ provider: LLMProvide
 
 /**
  * Where a handoff's rendered history is written for the fallback session to
- * read, one file per `toSessionId` — never inlined into the opening message
- * itself. A long conversation inlined directly into a prompt risks blowing
- * past the fallback provider's own context window before the user's actual
- * request is even reached; pointing at a file the fallback CLI reads with
- * its own file tool (as `~/.cloudcli` already does for OpenRouter's session
- * history — see `openrouter-history.store.ts`) keeps the opening message
- * itself small regardless of how long the original conversation was.
+ * read, one file per `toSessionId`, for every target except a text-only one
+ * (see `isTextOnlyProvider`), which has no file tool to read it with and
+ * gets the history inlined instead (`truncateForInlineContext`). A long
+ * conversation inlined directly into a prompt risks blowing past the
+ * fallback provider's own context window before the user's actual request
+ * is even reached; pointing at a file the fallback CLI reads with its own
+ * file tool keeps the opening message itself small regardless of how long
+ * the original conversation was.
  *
  * Assumes the fallback provider's file tool can read an absolute path
  * outside the project directory, which holds for Claude Code and Codex as
@@ -213,6 +214,22 @@ const HANDOFF_CONTEXT_DIR = path.join(os.homedir(), '.cloudcli', 'handoff-contex
  * this module's own tests, which verify the file is actually written and
  * readable rather than only checking the opening message's text.
  */
+/** Longest history a text-only target's opening message carries; past this it would eat into the window the user's actual request needs. */
+const MAX_INLINE_CONTEXT_CHARS = 12000;
+
+/**
+ * Keeps the *end* of `historyText` (the most recent, most relevant turns)
+ * within `MAX_INLINE_CONTEXT_CHARS`, since a text-only target has no file
+ * tool to read the rest from if it is cut. Used by `handoffSessionOnLimit`
+ * for a text-only target in place of `writeHandoffContextFile`.
+ */
+export function truncateForInlineContext(historyText: string): string {
+  if (historyText.length <= MAX_INLINE_CONTEXT_CHARS) {
+    return historyText;
+  }
+  return `[…earlier history cut, too long to include…]\n\n${historyText.slice(-MAX_INLINE_CONTEXT_CHARS)}`;
+}
+
 export async function writeHandoffContextFile(toSessionId: string, historyText: string): Promise<string> {
   await mkdir(HANDOFF_CONTEXT_DIR, { recursive: true });
   const filePath = path.join(HANDOFF_CONTEXT_DIR, `${toSessionId}.md`);
@@ -431,22 +448,34 @@ export async function handoffSessionOnLimit(
   })));
   const historyText = renderFamilyHistoryAsText(segments);
 
-  const contextFilePath = await writeHandoffContextFile(toSessionId, historyText);
+  // A text-only target (Custom API) has no file or shell access at all, so
+  // pointing it at a path — the only thing every other backend needs — would
+  // leave it stuck: it would say so, or worse, guess. Its history goes
+  // straight into the message instead, trimmed to a sane size since there is
+  // no file to defer the length to; every other backend keeps the file, kept
+  // out of the message itself so a long conversation cannot blow past the
+  // fallback's own context window before it even reaches the real request.
+  const targetIsTextOnly = isTextOnlyProvider(toProvider);
+  const contextReference = targetIsTextOnly
+    ? `\n\n${truncateForInlineContext(historyText)}`
+    : `, saved at ${await writeHandoffContextFile(toSessionId, historyText)} — read it`;
 
   // The previous agent may have been cut off mid-task (continue/manual) or simply
   // interrupted between turns (manual) — what it says it did and what is on disk
-  // can differ either way.
-  const checkFolderFirst = 'The previous backend may have left this mid-task. Before redoing or building on any step, check the actual state of the working folder (for example `git status` and `git diff`) and trust it over the conversation.';
+  // can differ either way. Meaningless for a text-only target, which has no folder to check.
+  const checkFolderFirst = targetIsTextOnly
+    ? []
+    : ['The previous backend may have left this mid-task. Before redoing or building on any step, check the actual state of the working folder (for example `git status` and `git diff`) and trust it over the conversation.'];
 
-  // A resumed session already has its own earlier turns natively; the file only adds what happened elsewhere meanwhile.
-  const readTheFile = resuming
-    ? `What happened on other backends since you were last active here is saved at ${contextFilePath} — read it, then continue from where YOU left off, folding in anything new.`
-    : `The prior conversation is saved at ${contextFilePath} — read it first, then continue from where it leaves off.`;
+  // A resumed session already has its own earlier turns natively; the context only adds what happened elsewhere meanwhile.
+  const readTheContext = resuming
+    ? `What happened on other backends since you were last active here${contextReference}, then continue from where YOU left off, folding in anything new.`
+    : `The prior conversation${contextReference} first, then continue from where it leaves off.`;
 
   const openingMessage = mode === 'standby'
     ? [
       `[Switched: the previous backend is close to ${REASON_LABEL[input.reason!]}.]`,
-      `The prior conversation is saved at ${contextFilePath} — read it so you have the context. Its last turn finished normally, so do not start any work yet: reply briefly that you are ready and wait for the next instruction.`,
+      `The prior conversation${contextReference} so you have the context. Its last turn finished normally, so do not start any work yet: reply briefly that you are ready and wait for the next instruction.`,
     ].join('\n\n')
     : [
       mode === 'manual'
@@ -454,8 +483,8 @@ export async function handoffSessionOnLimit(
           ? '[Switched: the user asked for this conversation to continue here again.]'
           : '[Switched: the user asked for this conversation to continue on a different backend.]')
         : `[Continued automatically: the previous backend hit ${REASON_LABEL[input.reason!]}.]`,
-      readTheFile,
-      checkFolderFirst,
+      readTheContext,
+      ...checkFolderFirst,
     ].join('\n\n');
 
   const dispatch = await startDetachedChatTurn(

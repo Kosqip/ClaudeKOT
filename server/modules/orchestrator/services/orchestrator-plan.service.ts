@@ -1,5 +1,11 @@
 import type { LLMProvider, OrchestratorSubtask, OrchestratorSubtaskAccess, ProviderRole } from '@/shared/types.js';
-import { AppError } from '@/shared/utils.js';
+import { AppError, isTextOnlyProvider } from '@/shared/utils.js';
+
+// isTextOnlyProvider re-exported for this module's existing consumers
+// (orchestrator-dispatch.service.ts and this module's own tests); its
+// definition now lives in @/shared/utils.js since the handoff module needs
+// it too.
+export { isTextOnlyProvider };
 
 /**
  * Canonical provider order `resolveSubtaskProvider` picks the first match
@@ -8,19 +14,6 @@ import { AppError } from '@/shared/utils.js';
  * so the tie-break never drifts out of sync with that union.
  */
 const PROVIDER_RESOLUTION_ORDER: LLMProvider[] = ['claude', 'codex', 'cursor', 'opencode', 'openrouter'];
-
-/**
- * Backends that only exchange text: no file access, no commands. The API
- * provider is one — it is a chat completion, not an agent. Work that needs
- * the project folder must not be planned for them, and they must be told so,
- * or they spend their turn explaining that they cannot open a file.
- */
-const TEXT_ONLY_PROVIDERS: LLMProvider[] = ['openrouter'];
-
-/** True when `provider` can only work from the text it is given. Used by the run to shape plans and subtask prompts. */
-export function isTextOnlyProvider(provider: LLMProvider | null): boolean {
-  return provider !== null && TEXT_ONLY_PROVIDERS.includes(provider);
-}
 
 const SUBTASK_SHAPE = '{"title": "short title", "description": "a complete, self-contained instruction — the backend that receives it has no other context from this conversation", "role": "hands", "access": "write"}';
 
