@@ -57,10 +57,12 @@ const adapters: Record<ApiService, ChatServiceAdapter> = {
   openrouter: createOpenAiCompatibleChatAdapter({
     url: 'https://openrouter.ai/api/v1/chat/completions',
     envVarName: 'OPENROUTER_API_KEY',
+    service: 'openrouter',
   }),
   openai: createOpenAiCompatibleChatAdapter({
     url: 'https://api.openai.com/v1/chat/completions',
     envVarName: 'OPENAI_DIRECT_API_KEY',
+    service: 'openai',
   }),
   anthropic: createAnthropicMessagesAdapter(),
 };

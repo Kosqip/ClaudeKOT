@@ -510,9 +510,24 @@
       "reAuthDescription": "Sign in with a different account or refresh credentials",
       "button": "Login",
       "reLoginButton": "Re-login",
-      "openRouterKeyTitle": "The key is set in the .env file",
-      "openRouterKeyDescription": "Open the .env file in the ClaudeKOT folder, add a line OPENROUTER_API_KEY=your_key, then restart npm start. The button below only checks again whether the key appeared.",
-      "recheckButton": "Check again"
+      "apiKeys": {
+        "title": "Custom API keys",
+        "description": "Set each key here — OpenRouter, direct Anthropic, direct OpenAI — separately. Saved on the server; no need to edit the .env file by hand. A model only works once its service has a key.",
+        "openrouterLabel": "OpenRouter",
+        "anthropicLabel": "Anthropic (direct)",
+        "openaiLabel": "OpenAI (direct)",
+        "sourceUi": "Set here",
+        "sourceEnv": "Set in .env ({{variable}})",
+        "sourceNone": "Not set",
+        "show": "Show",
+        "hide": "Hide",
+        "save": "Save",
+        "clear": "Clear",
+        "savedNotice": "Saved.",
+        "clearedNotice": "Key cleared.",
+        "failedNotice": "Could not save — check the connection to the server.",
+        "loadFailed": "Could not load the keys' status."
+      }
     },
     "error": "Error: {{error}}",
     "handoffThreshold": {

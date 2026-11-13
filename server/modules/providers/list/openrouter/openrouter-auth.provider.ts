@@ -1,4 +1,5 @@
 import { listServiceEnvVarNames } from '@/modules/providers/list/openrouter/openrouter-service-registry.js';
+import { readCustomApiKey } from '@/modules/providers/list/openrouter/services/custom-api-key-store.service.js';
 import type { IProviderAuth } from '@/shared/interfaces.js';
 import type { CliVersionProbe, ProviderAuthStatus } from '@/shared/types.js';
 
@@ -32,7 +33,7 @@ export class OpenRouterProviderAuth implements IProviderAuth {
     const services = listServiceEnvVarNames().map(({ service, envVarName }) => ({
       service,
       envVarName,
-      configured: Boolean(process.env[envVarName]?.trim()),
+      configured: Boolean(readCustomApiKey(service)),
     }));
     const configuredServices = services.filter((entry) => entry.configured);
 

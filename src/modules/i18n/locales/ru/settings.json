@@ -452,9 +452,24 @@
       "reAuthDescription": "Войдите с другим аккаунтом или обновите учетные данные",
       "button": "Войти",
       "reLoginButton": "Войти снова",
-      "openRouterKeyTitle": "Ключ задаётся в файле .env",
-      "openRouterKeyDescription": "Откройте файл .env в папке ClaudeKOT, впишите строку OPENROUTER_API_KEY=ваш_ключ и перезапустите npm start. Кнопка ниже просто проверяет ещё раз, появился ли ключ.",
-      "recheckButton": "Проверить снова"
+      "apiKeys": {
+        "title": "Ключи Custom API",
+        "description": "Задайте здесь ключи для OpenRouter, прямого Anthropic и прямого OpenAI — отдельно для каждого. Сохраняются на сервере, редактировать файл .env вручную не нужно. Работает только та модель, для чьего сервиса задан ключ.",
+        "openrouterLabel": "OpenRouter",
+        "anthropicLabel": "Anthropic (напрямую)",
+        "openaiLabel": "OpenAI (напрямую)",
+        "sourceUi": "Задан здесь",
+        "sourceEnv": "Задан в .env ({{variable}})",
+        "sourceNone": "Не задан",
+        "show": "Показать",
+        "hide": "Скрыть",
+        "save": "Сохранить",
+        "clear": "Убрать",
+        "savedNotice": "Сохранено.",
+        "clearedNotice": "Ключ убран.",
+        "failedNotice": "Не удалось сохранить — проверьте соединение с сервером.",
+        "loadFailed": "Не удалось загрузить статус ключей."
+      }
     },
     "error": "Ошибка: {{error}}",
     "handoffThreshold": {

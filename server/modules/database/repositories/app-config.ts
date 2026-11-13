@@ -37,6 +37,11 @@ export const appConfigDb = {
     ).run(key, value);
   },
 
+  /** Removes a config key. Used to clear a value back to "unset" rather than storing an empty string. */
+  delete(key: string): void {
+    getConnection().prepare('DELETE FROM app_config WHERE key = ?').run(key);
+  },
+
   /**
    * Returns the JWT signing secret, generating and persisting one
    * if it does not already exist. This ensures the secret survives

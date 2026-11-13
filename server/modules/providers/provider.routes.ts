@@ -11,6 +11,8 @@ import { providerSkillsService } from '@/modules/providers/services/skills.servi
 import { sessionConversationsSearchService } from '@/modules/providers/services/session-conversations-search.service.js';
 import { sideQuestionsService } from '@/modules/providers/services/side-questions.service.js';
 import { sessionsService } from '@/modules/providers/services/sessions.service.js';
+import { listCustomApiKeyStatus, writeCustomApiKey } from '@/modules/providers/list/openrouter/services/custom-api-key-store.service.js';
+import type { ApiService } from '@/modules/providers/list/openrouter/openrouter-service-registry.js';
 import type {
   CustomProviderModelEffort,
   CustomProviderModelInput,
@@ -1125,5 +1127,47 @@ router.get('/search/sessions', asyncHandler(async (req: Request, res: Response) 
     }
   }
 }));
+
+/**
+ * The Custom API provider's three service keys (`openrouter`, `anthropic`,
+ * `openai`), each as its env var name and where its value currently comes
+ * from — never the value itself. Used by the Custom API account tab.
+ */
+router.get(
+  '/openrouter/keys',
+  asyncHandler(async (_req: Request, res: Response) => {
+    res.json(createApiSuccessResponse({ keys: listCustomApiKeyStatus() }));
+  }),
+);
+
+const KNOWN_API_SERVICES: ApiService[] = ['openrouter', 'anthropic', 'openai'];
+
+function parseApiService(value: unknown): ApiService {
+  if (typeof value === 'string' && (KNOWN_API_SERVICES as string[]).includes(value)) {
+    return value as ApiService;
+  }
+  throw new AppError(`service must be one of: ${KNOWN_API_SERVICES.join(', ')}.`, {
+    code: 'INVALID_REQUEST_BODY',
+    statusCode: 400,
+  });
+}
+
+/**
+ * Saves (or, with an empty `value`, clears) one Custom API service's key.
+ * Stored on the server, not per-user — matches how the `.env` file it
+ * supersedes already worked. Never echoes the key back.
+ */
+router.put(
+  '/openrouter/keys/:service',
+  asyncHandler(async (req: Request, res: Response) => {
+    const service = parseApiService(req.params.service);
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    if (body.value !== undefined && typeof body.value !== 'string') {
+      throw new AppError('value must be a string.', { code: 'INVALID_REQUEST_BODY', statusCode: 400 });
+    }
+    writeCustomApiKey(service, typeof body.value === 'string' ? body.value : null);
+    res.json(createApiSuccessResponse({ keys: listCustomApiKeyStatus() }));
+  }),
+);
 
 export default router;

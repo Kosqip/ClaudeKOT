@@ -3,7 +3,7 @@ import os from 'node:os';
 import { userPreferencesDb } from '@/modules/database/index.js';
 import { getProviderLimitedUntil } from '@/modules/handoff/index.js';
 import { listRecentOrchestratorRuns } from '@/modules/orchestrator/index.js';
-import { providerAuthService } from '@/modules/providers/index.js';
+import { listCustomApiKeyStatus, providerAuthService } from '@/modules/providers/index.js';
 import type { LLMProvider } from '@/shared/types.js';
 
 /** How many recent console lines are kept for the report. */
@@ -12,8 +12,8 @@ const MAX_LOG_LINES = 400;
 const MAX_LOG_LINE_CHARS = 2000;
 
 const PROVIDERS: LLMProvider[] = ['claude', 'codex', 'cursor', 'opencode', 'openrouter'];
-/** Keys the app reads from the environment; the report says only whether each is set. */
-const KEY_VARIABLES = ['OPENROUTER_API_KEY', 'ANTHROPIC_DIRECT_API_KEY', 'OPENAI_DIRECT_API_KEY', 'ANTHROPIC_API_KEY', 'OPENAI_API_KEY'];
+/** Keys read straight from the environment (not through Custom API's own key store); the report says only whether each is set. */
+const KEY_VARIABLES = ['ANTHROPIC_API_KEY', 'OPENAI_API_KEY'];
 /** Preferences worth seeing when something misbehaves; none of them holds a secret. */
 const REPORTED_PREFERENCES = ['providerRoles', 'handoffFallbackOrder', 'handoffThresholdPercent', 'openRouterProviderSort'];
 
@@ -126,7 +126,11 @@ export async function buildDiagnosticsReport(input: { userId: number; appVersion
     '--- Backends ---',
     ...providers,
     '',
-    '--- Keys (set or not; values are never included) ---',
+    '--- Custom API keys (set or not; values are never included) ---',
+    ...listCustomApiKeyStatus().map(({ envVarName, source }) =>
+      `${envVarName}: ${source === 'none' ? 'not set' : source === 'ui' ? 'set in Settings' : 'set in .env'}`),
+    '',
+    '--- Other keys (set or not; values are never included) ---',
     ...KEY_VARIABLES.map((name) => `${name}: ${process.env[name] ? 'set' : 'not set'}`),
     '',
     '--- Settings ---',

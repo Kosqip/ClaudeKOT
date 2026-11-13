@@ -1,6 +1,7 @@
 import { AlertTriangle, LogIn } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
+import CustomApiKeysForm from '@/modules/settings/tabs/agents-settings/sections/content/CustomApiKeysForm';
 import ProviderCliVersion from '@/modules/settings/tabs/agents-settings/sections/content/ProviderCliVersion';
 import { Badge, Button, LLMProviderLogo } from '@/shared/ui';
 import type { AgentProvider, ProviderAuthStatus, ProviderAuthSubscriptionOverride } from '@/shared/types';
@@ -170,30 +171,11 @@ export default function AccountContent({ agent, authStatus, onLogin }: AccountCo
             subtextClass={config.subtextClass}
           />
 
-          {/* OpenRouter has no browser login flow: the key is set in the server's
-              .env file, so this shows that instruction and a recheck button
-              instead of the "Log in" button every other provider gets. */}
-          {agent === 'openrouter' && !authStatus.authenticated && (
-            <div className="border-t border-border/50 pt-4">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <div className={`font-medium ${config.textClass}`}>
-                    {t('agents.login.openRouterKeyTitle')}
-                  </div>
-                  <div className={`text-sm ${config.subtextClass}`}>
-                    {t('agents.login.openRouterKeyDescription')}
-                  </div>
-                </div>
-                <Button
-                  onClick={onLogin}
-                  className={`${config.buttonClass} text-white`}
-                  size="sm"
-                >
-                  {t('agents.login.recheckButton')}
-                </Button>
-              </div>
-            </div>
-          )}
+          {/* OpenRouter has no browser login flow: its three services' keys are
+              set right here instead of the "Log in" button every CLI provider
+              gets. Saving one re-checks auth status (onChanged -> onLogin) so
+              the badge above updates without a manual refresh. */}
+          {agent === 'openrouter' && <CustomApiKeysForm onChanged={onLogin} />}
 
           {agent !== 'openrouter' && authStatus.method !== 'api_key' && (
             <div className="border-t border-border/50 pt-4">

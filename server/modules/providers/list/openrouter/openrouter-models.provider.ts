@@ -1,3 +1,4 @@
+import { readCustomApiKey } from '@/modules/providers/list/openrouter/services/custom-api-key-store.service.js';
 import type { IProviderModels } from '@/shared/interfaces.js';
 import type { ProviderCurrentActiveModel, ProviderModelsDefinition } from '@/shared/types.js';
 import { buildDefaultProviderCurrentActiveModel } from '@/shared/utils.js';
@@ -131,7 +132,7 @@ export class OpenRouterProviderModels implements IProviderModels {
 
   constructor(
     private readonly fetchImpl: typeof fetch = (...args) => globalThis.fetch(...args),
-    private readonly hasOpenRouterKey: () => boolean = () => Boolean(process.env.OPENROUTER_API_KEY),
+    private readonly hasOpenRouterKey: () => boolean = () => Boolean(readCustomApiKey('openrouter')),
   ) {}
 
   async getSupportedModels(): Promise<ProviderModelsDefinition> {

@@ -1,3 +1,4 @@
+import { readCustomApiKey } from '@/modules/providers/list/openrouter/services/custom-api-key-store.service.js';
 import type { AnyRecord } from '@/shared/types.js';
 import type { ChatServiceAdapter, ChatTurn } from '@/modules/providers/list/openrouter/openrouter-service-registry.js';
 
@@ -26,10 +27,8 @@ const DEFAULT_MAX_TOKENS = 8192;
  * Consumed by `openrouter-service-registry.ts`, which owns the one instance.
  */
 export function createAnthropicMessagesAdapter(): ChatServiceAdapter {
-  const readApiKey = (): string | null => {
-    const value = process.env[ANTHROPIC_DIRECT_API_KEY_ENV_VAR];
-    return value && value.trim() ? value.trim() : null;
-  };
+  // Checks the key saved through Settings before the env var — see `readCustomApiKey`.
+  const readApiKey = (): string | null => readCustomApiKey('anthropic');
 
   return {
     envVarName: ANTHROPIC_DIRECT_API_KEY_ENV_VAR,

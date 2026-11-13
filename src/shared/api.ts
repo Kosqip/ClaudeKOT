@@ -459,6 +459,12 @@ export const api = {
       post(`/api/providers/${encodeURIComponent(provider)}/cli/update`),
     claudeSettingsPermissions: () => get('/api/providers/claude/settings-permissions'),
 
+    // Custom API's three service keys (OpenRouter/Anthropic/OpenAI), set from
+    // Settings instead of the server's .env file. Used by AccountContent.
+    openRouterKeys: () => get('/api/providers/openrouter/keys'),
+    setOpenRouterKey: (service: string, value: string) =>
+      put(`/api/providers/openrouter/keys/${encodeURIComponent(service)}`, { value }),
+
     models: (provider: string) => get(`/api/providers/${provider}/models`),
     createModel: (provider: string, input: unknown) =>
       post(`/api/providers/${provider}/models`, input),

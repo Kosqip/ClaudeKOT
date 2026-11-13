@@ -43,3 +43,8 @@ export {
 // routes, server/index.ts reads Codex's plan-limit reading through it when a
 // Codex turn ends (getCodexRateLimitStatus).
 export { providerTokenUsageService } from '@/modules/providers/services/provider-token-usage.service.js';
+
+// listCustomApiKeyStatus: read by the diagnostics report to show which
+// Custom API services have a key set and where it came from (UI or .env),
+// without ever including the value.
+export { listCustomApiKeyStatus } from '@/modules/providers/list/openrouter/services/custom-api-key-store.service.js';
