@@ -187,9 +187,9 @@ export default function AccountContent({ agent, authStatus, onLogin }: AccountCo
               <div className="text-sm text-red-600 dark:text-red-400">
                 {t('agents.login.notInstalled', { agent: config.name })}
               </div>
-              {authStatus.error && (
-                <div className={`mt-1 text-sm ${config.subtextClass}`}>{authStatus.error}</div>
-              )}
+              <div className={`mt-1 text-sm ${config.subtextClass}`}>
+                {t(`agents.login.notInstalledHint.${agent}`, { defaultValue: authStatus.error ?? '' })}
+              </div>
             </div>
           )}
 

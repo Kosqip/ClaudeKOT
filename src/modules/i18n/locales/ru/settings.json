@@ -470,7 +470,13 @@
         "failedNotice": "Не удалось сохранить — проверьте соединение с сервером.",
         "loadFailed": "Не удалось загрузить статус ключей."
       },
-      "notInstalled": "{{agent}} не найден как команда в терминале на этом компьютере. Если у вас установлено приложение OpenCode Desktop — похоже, это другая программа: нужна именно консольная версия (команда opencode). Проверьте в PowerShell командой \"opencode --version\" — если она не распознана, нужно отдельно установить CLI с opencode.ai/docs."
+      "notInstalled": "Консольная программа {{agent}} не найдена на этом компьютере, поэтому войти отсюда нельзя.",
+      "notInstalledHint": {
+        "claude": "Установите Claude Code: docs.anthropic.com/en/docs/claude-code. После установки перезапустите ClaudeKOT.",
+        "cursor": "Редактор Cursor и консольный Cursor Agent — разные программы. Нужен именно Cursor Agent (команда cursor-agent): cursor.com/cli. Проверка в PowerShell: cursor-agent --version. После установки перезапустите ClaudeKOT.",
+        "codex": "Codex поставляется вместе с ClaudeKOT; если он не найден, выполните npm install в папке ClaudeKOT и перезапустите.",
+        "opencode": "Приложение OpenCode Desktop и консольный OpenCode — разные программы. Нужен именно консольный (команда opencode): opencode.ai/docs. Проверка в PowerShell: opencode --version. После установки перезапустите ClaudeKOT."
+      }
     },
     "error": "Ошибка: {{error}}",
     "handoffThreshold": {

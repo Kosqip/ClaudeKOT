@@ -31,7 +31,7 @@ const PROVIDER_META: { id: LLMProvider; name: string }[] = [
   { id: "codex", name: "OpenAI" },
   { id: "cursor", name: "Cursor" },
   { id: "opencode", name: "OpenCode" },
-  { id: "openrouter", name: "OpenRouter" },
+  { id: "openrouter", name: "Custom API" },
 ];
 
 const MOD_KEY =
@@ -79,7 +79,7 @@ function getProviderDisplayName(p: LLMProvider) {
   if (p === "cursor") return "Cursor";
   if (p === "codex") return "Codex";
   if (p === "opencode") return "OpenCode";
-  if (p === "openrouter") return "OpenRouter";
+  if (p === "openrouter") return "Custom API";
   return "Claude";
 }
 
@@ -333,7 +333,7 @@ export default function ProviderSelectionEmptyState({
                 }),
                 openrouter: t("providerSelection.readyPrompt.openrouter", {
                   model: providerModels.openrouter,
-                  defaultValue: "Ready with OpenRouter {{model}}",
+                  defaultValue: "Ready with Custom API {{model}}",
                 }),
               }[provider]
             }

@@ -68,7 +68,6 @@ const OPENROUTER_MODELS_URL = 'https://openrouter.ai/api/v1/models';
 const LIVE_CATALOG_TTL_MS = 60 * 60 * 1000;
 const LIVE_CATALOG_RETRY_MS = 5 * 60 * 1000;
 const LIVE_CATALOG_TIMEOUT_MS = 4000;
-const MAX_LIVE_FREE_MODELS = 20;
 
 /** True for a catalog entry that names a model on OpenRouter itself, not a direct Anthropic/OpenAI one. */
 function isOpenRouterEntry(value: string): boolean {
@@ -77,9 +76,9 @@ function isOpenRouterEntry(value: string): boolean {
 
 /**
  * Builds the catalog from OpenRouter's own current model list (the `data`
- * array of `GET /api/v1/models`): its free models first, then the predefined
- * OpenRouter entries that still exist there, then the direct-API entries
- * untouched. OpenRouter retires and renames free models often, so a fixed
+ * array of `GET /api/v1/models`): the predefined OpenRouter entries that
+ * still exist there, then its free models, then every other (paid) model it
+ * lists, then the direct-API entries untouched. OpenRouter retires and renames free models often, so a fixed
  * list goes stale and a session started on a retired id fails with "model
  * not found"; an entry OpenRouter no longer lists is therefore dropped, and
  * the default moves to the first free model when the predefined one is gone.
@@ -99,18 +98,25 @@ export function mergeLiveOpenRouterCatalog(liveModels: unknown): ProviderModelsD
   const kept = OPENROUTER_PREDEFINED_MODELS.OPTIONS.filter((option) =>
     !isOpenRouterEntry(option.value) || liveIds.has(option.value));
   const keptIds = new Set(kept.map((option) => option.value));
-  const free = live
-    .filter((model) => model.id.endsWith(':free') && !keptIds.has(model.id))
-    .slice(0, MAX_LIVE_FREE_MODELS)
-    .map((model) => ({
-      value: model.id,
-      label: `${typeof model.name === 'string' && model.name ? model.name : model.id} (OpenRouter)`,
-      description: 'Free-tier OpenRouter model, from OpenRouter\'s current list.',
-    }));
+  const describe = (model: { id: string; name?: unknown }, description: string) => ({
+    value: model.id,
+    label: `${typeof model.name === 'string' && model.name ? model.name : model.id} (OpenRouter)`,
+    description,
+  });
+  const others = live.filter((model) => !keptIds.has(model.id));
+  const free = others
+    .filter((model) => model.id.endsWith(':free'))
+    .map((model) => describe(model, 'Free-tier OpenRouter model, from OpenRouter\'s current list.'));
+  // Everything else OpenRouter sells: paid per token on the OpenRouter key. The picker has a search box.
+  const paid = others
+    .filter((model) => !model.id.endsWith(':free'))
+    .map((model) => describe(model, 'Paid per token on your OpenRouter key.'))
+    .sort((left, right) => left.label.localeCompare(right.label));
 
   const options = [
     ...kept.filter((option) => isOpenRouterEntry(option.value)),
     ...free,
+    ...paid,
     ...kept.filter((option) => !isOpenRouterEntry(option.value)),
   ];
   const defaultStillListed = liveIds.has(OPENROUTER_PREDEFINED_MODELS.DEFAULT);
@@ -133,9 +139,24 @@ export class OpenRouterProviderModels implements IProviderModels {
   constructor(
     private readonly fetchImpl: typeof fetch = (...args) => globalThis.fetch(...args),
     private readonly hasOpenRouterKey: () => boolean = () => Boolean(readCustomApiKey('openrouter')),
+    /** Whether the direct Anthropic / OpenAI key is set; their entries are hidden without it. */
+    private readonly hasDirectKey: (service: 'anthropic' | 'openai') => boolean = (service) => Boolean(readCustomApiKey(service)),
   ) {}
 
+  /**
+   * The catalog the user can actually use: a direct Anthropic/OpenAI entry
+   * is left out while that service has no key — picking it could only fail,
+   * and most users never set those keys.
+   */
   async getSupportedModels(): Promise<ProviderModelsDefinition> {
+    const catalog = await this.loadCatalog();
+    const usable = catalog.OPTIONS.filter((option) =>
+      !(option.value.startsWith('anthropic:') && !this.hasDirectKey('anthropic'))
+      && !(option.value.startsWith('openai:') && !this.hasDirectKey('openai')));
+    return usable.length === catalog.OPTIONS.length ? catalog : { ...catalog, OPTIONS: usable };
+  }
+
+  private async loadCatalog(): Promise<ProviderModelsDefinition> {
     if (!this.hasOpenRouterKey()) {
       return OPENROUTER_PREDEFINED_MODELS;
     }

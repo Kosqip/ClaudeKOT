@@ -169,7 +169,7 @@
   },
   "providerSelection": {
     "title": "Выберите вашего AI-ассистента",
-    "description": "Выберите провайдера для начала нового разговора",
+    "description": "Нажмите на карточку ниже, чтобы выбрать бэкенд (Claude, Codex, Custom API…) и модель",
     "selectModel": "Выбрать модель",
     "providerInfo": {
       "anthropic": "от Anthropic",
@@ -181,10 +181,20 @@
       "claude": "Готов использовать Claude с {{model}}. Начните вводить сообщение ниже.",
       "cursor": "Готов использовать Cursor с {{model}}. Начните вводить сообщение ниже.",
       "codex": "Готов использовать Codex с {{model}}. Начните вводить сообщение ниже.",
-      "default": "Выберите провайдера выше для начала"
+      "default": "Выберите провайдера выше для начала",
+      "opencode": "Готов использовать OpenCode с {{model}}. Начните вводить сообщение ниже.",
+      "openrouter": "Готов использовать Custom API с {{model}}. Начните вводить сообщение ниже."
     },
     "pressToSearch": "Нажмите <kbd>{{shortcut}}</kbd>, чтобы искать сессии, файлы и коммиты",
-    "chooseModelDescriptionCustomOnly": "Для {{providers, list}} показаны только ваши модели"
+    "chooseModelDescriptionCustomOnly": "Для {{providers, list}} показаны только ваши модели",
+    "chooseModel": "Выбор бэкенда и модели",
+    "chooseModelDescription": "Встроенные и ваши модели в одном списке",
+    "addModel": "Добавить модель",
+    "searchModels": "Поиск модели…",
+    "manageModels": "Управление моделями",
+    "noModelsFound": "Модели не найдены.",
+    "loadingModels": "Загружаю модели…",
+    "clickToChange": "Нажмите, чтобы сменить бэкенд или модель"
   },
   "session": {
     "continue": {

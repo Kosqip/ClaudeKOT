@@ -531,7 +531,13 @@
         "failedNotice": "Could not save — check the connection to the server.",
         "loadFailed": "Could not load the keys' status."
       },
-      "notInstalled": "{{agent}} was not found as a command in this computer's terminal. If you have the OpenCode Desktop app installed, that looks like a different program: this needs the console version specifically (the opencode command). Check in PowerShell with \"opencode --version\" - if it is not recognized, install the CLI separately from opencode.ai/docs."
+      "notInstalled": "The {{agent}} command-line program was not found on this computer, so there is nothing to log in to from here.",
+      "notInstalledHint": {
+        "claude": "Install Claude Code: docs.anthropic.com/en/docs/claude-code. Restart ClaudeKOT afterwards.",
+        "cursor": "The Cursor editor and the command-line Cursor Agent are different programs. This needs Cursor Agent (the cursor-agent command): cursor.com/cli. Check in a terminal: cursor-agent --version. Restart ClaudeKOT afterwards.",
+        "codex": "Codex ships with ClaudeKOT; if it is not found, run npm install in the ClaudeKOT folder and restart.",
+        "opencode": "The OpenCode Desktop app and the command-line OpenCode are different programs. This needs the command-line one (the opencode command): opencode.ai/docs. Check in a terminal: opencode --version. Restart ClaudeKOT afterwards."
+      }
     },
     "error": "Error: {{error}}",
     "handoffThreshold": {

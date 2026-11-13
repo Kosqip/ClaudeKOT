@@ -23,7 +23,9 @@ test('the live catalog drops OpenRouter entries that no longer exist and moves t
   assert.equal(values.includes('google/gemma-4-31b-it:free'), false);
   assert.equal(values.includes('google/gemini-3.8-flash'), true);
   assert.equal(values.includes('vendor/new-model:free'), true);
-  assert.equal(values.includes('vendor/paid-model'), false);
+  // Paid models are listed too, after the free ones.
+  assert.equal(values.includes('vendor/paid-model'), true);
+  assert.ok(values.indexOf('vendor/new-model:free') < values.indexOf('vendor/paid-model'));
   // Direct Anthropic/OpenAI entries are not OpenRouter's to confirm and stay.
   assert.equal(values.includes('anthropic:claude-sonnet-5-5'), true);
   assert.equal(catalog.DEFAULT, 'vendor/new-model:free');
@@ -38,18 +40,29 @@ test('the live list is fetched once per hour, only with a key, and a failure fal
   let calls = 0;
   const okFetch = (async () => { calls += 1; return { ok: true, json: async () => ({ data: LIVE }) }; }) as unknown as typeof fetch;
 
-  const withoutKey = new OpenRouterProviderModels(okFetch, () => false);
+  const withoutKey = new OpenRouterProviderModels(okFetch, () => false, () => true);
   assert.equal(await withoutKey.getSupportedModels(), OPENROUTER_PREDEFINED_MODELS);
   assert.equal(calls, 0);
 
-  const withKey = new OpenRouterProviderModels(okFetch, () => true);
+  const withKey = new OpenRouterProviderModels(okFetch, () => true, () => true);
   assert.equal((await withKey.getSupportedModels()).DEFAULT, 'vendor/new-model:free');
   await withKey.getSupportedModels();
   assert.equal(calls, 1);
   assert.equal((await withKey.getCurrentActiveModel()).model, 'vendor/new-model:free');
 
-  const failing = new OpenRouterProviderModels((async () => { throw new Error('offline'); }) as unknown as typeof fetch, () => true);
+  const failing = new OpenRouterProviderModels((async () => { throw new Error('offline'); }) as unknown as typeof fetch, () => true, () => true);
   assert.equal(await failing.getSupportedModels(), OPENROUTER_PREDEFINED_MODELS);
+});
+
+test('direct Anthropic and OpenAI entries are hidden until that service has a key', async () => {
+  const noFetch = (async () => { throw new Error('unused'); }) as unknown as typeof fetch;
+  const values = async (hasDirect: (service: string) => boolean) =>
+    (await new OpenRouterProviderModels(noFetch, () => false, hasDirect).getSupportedModels()).OPTIONS.map((option) => option.value);
+
+  assert.equal((await values(() => false)).some((value) => value.startsWith('anthropic:') || value.startsWith('openai:')), false);
+  const onlyOpenAi = await values((service) => service === 'openai');
+  assert.equal(onlyOpenAi.some((value) => value.startsWith('openai:')), true);
+  assert.equal(onlyOpenAi.some((value) => value.startsWith('anthropic:')), false);
 });
 
 test('the routing choice becomes OpenRouter\'s provider sort, and anything else leaves its default routing alone', () => {
