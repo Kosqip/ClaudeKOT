@@ -82,6 +82,8 @@ type ComposerPermissionMenuProps = {
   permissionMode: PermissionMode;
   /** Modes the active provider supports, in the order the backend reports them. */
   permissionModes: PermissionMode[];
+  /** See ChatComposer's own doc comment on this prop. */
+  isTextOnlyProvider?: boolean;
   onSelectPermissionMode: (mode: PermissionMode) => void;
   providerLabel: string;
 };
@@ -93,6 +95,7 @@ type ComposerPermissionMenuProps = {
 function ComposerPermissionMenu({
   permissionMode,
   permissionModes,
+  isTextOnlyProvider,
   onSelectPermissionMode,
   providerLabel,
 }: ComposerPermissionMenuProps) {
@@ -161,7 +164,11 @@ function ComposerPermissionMenu({
                 key={mode}
                 icon={<ModeIcon className="h-4 w-4" />}
                 label={modeLabel(mode)}
-                description={t(`codex.descriptions.${mode}`, { defaultValue: '' }) || undefined}
+                description={
+                  isTextOnlyProvider && mode === 'default'
+                    ? t('composer.textOnlyModeDescription', { defaultValue: 'This backend only exchanges text: it cannot run commands or edit files on its own.' })
+                    : t(`codex.descriptions.${mode}`, { defaultValue: '' }) || undefined
+                }
                 isSelected={mode === permissionMode}
                 onSelect={() => {
                   onSelectPermissionMode(mode);

@@ -198,6 +198,20 @@ export const SETTING_ROW_CLASS =
 
 // ---------------------------
 
+//----------------- CUSTOM API KEY EVENTS ------------
+
+/**
+ * Dispatched on `window` by `CustomApiKeysForm` whenever a Custom API
+ * service's key is saved or cleared from Settings. `useChatProviderState`
+ * listens for it to reload every provider's model catalog, since an open
+ * chat's catalog was fetched once at mount and would otherwise keep
+ * showing Custom API's small predefined list after a key is added — the
+ * chat page has no other way to learn that something changed server-side.
+ */
+export const CUSTOM_API_KEYS_CHANGED_EVENT = 'custom-api-keys-changed';
+
+// ---------------------------
+
 //----------------- TERMINAL TIMING ------------
 
 /**

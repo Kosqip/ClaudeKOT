@@ -43,6 +43,10 @@ function ComposerModelMenu({
   const { t } = useTranslation('chat');
   const [isOpen, setIsOpen] = useState(false);
   const [isModelSectionOpen, setIsModelSectionOpen] = useState(false);
+  // What the user typed to narrow the model list below — OpenRouter alone
+  // can list hundreds of models, where scanning an unfiltered list is not
+  // practical. Cleared with the model section so a reopen starts fresh.
+  const [modelFilter, setModelFilter] = useState('');
   const close = useCallback(() => setIsOpen(false), []);
   const { triggerRef, menuRef, anchor, updateAnchor } = useComposerMenuAnchor(isOpen, close);
 
@@ -51,8 +55,25 @@ function ComposerModelMenu({
   useEffect(() => {
     if (!isOpen) {
       setIsModelSectionOpen(false);
+      setModelFilter('');
     }
   }, [isOpen]);
+
+  /** Above this count a flat, unfiltered list is impractical to scan by eye — the search box earns its place. */
+  const SEARCH_THRESHOLD = 10;
+  /** Hard cap on rendered rows even while filtering, so one keystroke in a huge catalog cannot make the popover itself slow to open. */
+  const MAX_VISIBLE_MODELS = 200;
+  const normalizedFilter = modelFilter.trim().toLowerCase();
+  const filteredModelOptions = useMemo(() => {
+    if (!normalizedFilter) {
+      return modelOptions;
+    }
+    return modelOptions.filter((option) =>
+      (option.label || option.value).toLowerCase().includes(normalizedFilter)
+      || option.value.toLowerCase().includes(normalizedFilter));
+  }, [modelOptions, normalizedFilter]);
+  const visibleModelOptions = filteredModelOptions.slice(0, MAX_VISIBLE_MODELS);
+  const hiddenModelCount = filteredModelOptions.length - visibleModelOptions.length;
 
   const defaultEffortLabel = t('composer.effortDefault', { defaultValue: 'Default' });
   const resolvedEffortOptions = useMemo<EffortOption[]>(
@@ -148,7 +169,24 @@ function ComposerModelMenu({
                       {t('composer.loadingModels', { defaultValue: 'Loading models…' })}
                     </p>
                   )}
-                  {modelOptions.map((option) => (
+                  {modelOptions.length > SEARCH_THRESHOLD && (
+                    // eslint-disable-next-line jsx-a11y/no-autofocus -- the section was just expanded by a deliberate click; focusing its one input is the point.
+                    <input
+                      type="text"
+                      value={modelFilter}
+                      onChange={(event) => setModelFilter(event.target.value)}
+                      placeholder={t('composer.searchModels', { defaultValue: 'Search models…' })}
+                      autoFocus
+                      className="mx-1 mb-1 w-[calc(100%-0.5rem)] rounded-md border border-border/60 bg-background px-2 py-1 text-sm outline-none focus:border-ring"
+                      onKeyDown={(event) => event.stopPropagation()}
+                    />
+                  )}
+                  {filteredModelOptions.length === 0 && (
+                    <p className="px-2.5 py-1.5 text-sm text-muted-foreground">
+                      {t('composer.noModelsFound', { defaultValue: 'No models found.' })}
+                    </p>
+                  )}
+                  {visibleModelOptions.map((option) => (
                     <ComposerMenuItem
                       key={option.value}
                       label={option.label || option.value}
@@ -159,6 +197,14 @@ function ComposerModelMenu({
                       }}
                     />
                   ))}
+                  {hiddenModelCount > 0 && (
+                    <p className="px-2.5 py-1.5 text-xs text-muted-foreground">
+                      {t('composer.moreModelsHint', {
+                        count: hiddenModelCount,
+                        defaultValue: '{{count}} more — keep typing to narrow it down',
+                      })}
+                    </p>
+                  )}
                 </>
               )}
             </>

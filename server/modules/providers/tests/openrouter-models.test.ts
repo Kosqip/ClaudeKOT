@@ -8,6 +8,7 @@ import {
   OPENROUTER_PREDEFINED_MODELS,
   OpenRouterProviderModels,
 } from '@/modules/providers/list/openrouter/openrouter-models.provider.js';
+import type { ProviderModelsDefinition } from '@/shared/types.js';
 
 const LIVE = [
   { id: 'google/gemini-3.8-flash', name: 'Gemini 3.8 Flash' },
@@ -26,9 +27,20 @@ test('the live catalog drops OpenRouter entries that no longer exist and moves t
   // Paid models are listed too, after the free ones.
   assert.equal(values.includes('vendor/paid-model'), true);
   assert.ok(values.indexOf('vendor/new-model:free') < values.indexOf('vendor/paid-model'));
-  // Direct Anthropic/OpenAI entries are not OpenRouter's to confirm and stay.
-  assert.equal(values.includes('anthropic:claude-sonnet-5-5'), true);
+  // The predefined Claude/GPT entries are plain OpenRouter ids (vendor/model,
+  // no service prefix) like any other paid one here, so they are confirmed
+  // against the live list the same way and dropped when it does not have them.
+  assert.equal(values.includes('anthropic/claude-sonnet-5.5'), false);
   assert.equal(catalog.DEFAULT, 'vendor/new-model:free');
+});
+
+test('a predefined Claude/GPT entry (an OpenRouter id, not a direct-API one) survives when the live list still has it', () => {
+  const catalog = mergeLiveOpenRouterCatalog([
+    ...LIVE,
+    { id: 'anthropic/claude-opus-5.5', name: 'Claude Opus 5.5' },
+  ]);
+  const values = catalog.OPTIONS.map((option) => option.value);
+  assert.equal(values.includes('anthropic/claude-opus-5.5'), true);
 });
 
 test('an empty or malformed live list leaves the predefined catalog untouched', () => {
@@ -54,14 +66,35 @@ test('the live list is fetched once per hour, only with a key, and a failure fal
   assert.equal(await failing.getSupportedModels(), OPENROUTER_PREDEFINED_MODELS);
 });
 
-test('direct Anthropic and OpenAI entries are hidden until that service has a key', async () => {
+test('getSupportedModels hides any direct Anthropic/OpenAI entry its catalog contains until that service has a key', async () => {
+  // None of the predefined entries use the "anthropic:"/"openai:" direct-API
+  // prefix any more (see this module's doc comment), so this plants one
+  // straight into OPENROUTER_PREDEFINED_MODELS' own shape via a live catalog
+  // that mergeLiveOpenRouterCatalog leaves such an id in regardless of
+  // content (direct ids are never checked against OpenRouter's own list —
+  // see isOpenRouterEntry) — exercising the filter on the shape it is meant
+  // to catch, independent of what ships by default today.
+  const catalogWithDirectEntries: ProviderModelsDefinition = {
+    OPTIONS: [...OPENROUTER_PREDEFINED_MODELS.OPTIONS, { value: 'anthropic:claude-opus-5-5', label: 'Direct Claude' }, { value: 'openai:gpt-5.5', label: 'Direct GPT' }],
+    DEFAULT: OPENROUTER_PREDEFINED_MODELS.DEFAULT,
+  };
+  assert.deepEqual(mergeLiveOpenRouterCatalog([]), OPENROUTER_PREDEFINED_MODELS); // sanity: untouched by an empty live list
+
   const noFetch = (async () => { throw new Error('unused'); }) as unknown as typeof fetch;
+  const withCatalog = (hasOpenRouterKey: boolean, hasDirect: (service: string) => boolean) => {
+    const instance = new OpenRouterProviderModels(noFetch, () => hasOpenRouterKey, hasDirect);
+    (instance as unknown as { cached: { catalog: ProviderModelsDefinition; until: number } }).cached = {
+      catalog: catalogWithDirectEntries,
+      until: Date.now() + 60_000,
+    };
+    return instance;
+  };
   const values = async (hasDirect: (service: string) => boolean) =>
-    (await new OpenRouterProviderModels(noFetch, () => false, hasDirect).getSupportedModels()).OPTIONS.map((option) => option.value);
+    (await withCatalog(true, hasDirect).getSupportedModels()).OPTIONS.map((option) => option.value);
 
   assert.equal((await values(() => false)).some((value) => value.startsWith('anthropic:') || value.startsWith('openai:')), false);
   const onlyOpenAi = await values((service) => service === 'openai');
-  assert.equal(onlyOpenAi.some((value) => value.startsWith('openai:')), true);
+  assert.equal(onlyOpenAi.includes('openai:gpt-5.5'), true);
   assert.equal(onlyOpenAi.some((value) => value.startsWith('anthropic:')), false);
 });
 

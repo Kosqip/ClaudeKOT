@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { Eye, EyeOff } from 'lucide-react';
 
 import { api } from '@/shared/api';
+import { CUSTOM_API_KEYS_CHANGED_EVENT } from '@/shared/constants';
 import { Button } from '@/shared/ui';
 
 type KeyStatus = { service: 'openrouter' | 'anthropic' | 'openai'; envVarName: string; source: 'ui' | 'env' | 'none' };
@@ -48,6 +49,7 @@ function KeyRow({
       setValue('');
       setFeedback(nextValue ? 'saved' : 'cleared');
       onSaved(keys);
+      window.dispatchEvent(new Event(CUSTOM_API_KEYS_CHANGED_EVENT));
     } catch {
       setFeedback('failed');
     } finally {

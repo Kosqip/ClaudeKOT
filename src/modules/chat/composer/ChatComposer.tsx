@@ -64,6 +64,8 @@ type ChatComposerProps = {
   canAbortSession?: boolean;
   permissionMode: PermissionMode;
   availablePermissionModes: PermissionMode[];
+  /** Custom API: a plain HTTP chat backend with no tools, so "default" mode runs no commands — ComposerPermissionMenu shows that instead of the generic command-approval text. */
+  isTextOnlyProvider?: boolean;
   onSelectPermissionMode: (mode: PermissionMode) => void;
   providerLabel: string;
   effort: string;
@@ -150,6 +152,7 @@ export default function ChatComposer({
   canAbortSession = true,
   permissionMode,
   availablePermissionModes,
+  isTextOnlyProvider,
   onSelectPermissionMode,
   providerLabel,
   effort,
@@ -529,6 +532,7 @@ export default function ChatComposer({
             <ComposerPermissionMenu
               permissionMode={permissionMode}
               permissionModes={availablePermissionModes}
+              isTextOnlyProvider={isTextOnlyProvider}
               onSelectPermissionMode={onSelectPermissionMode}
               providerLabel={providerLabel}
             />

@@ -8,15 +8,18 @@ import { buildDefaultProviderCurrentActiveModel } from '@/shared/utils.js';
  * `openrouter` provider's three API services.
  *
  * A bare id with no `<service>:` prefix (OpenRouter's own catalog format,
- * e.g. `meta-llama/llama-3.1-8b-instruct:free`) is always read as an
+ * e.g. `meta-llama/llama-3.1-8b-instruct:free` or `anthropic/claude-opus-5.5`
+ * — vendor and model separated by `/`, never by `:`) is always read as an
  * OpenRouter model — see `parseModelReference` in
- * `openrouter-service-registry.ts`. `anthropic:`/`openai:` prefixed ids
- * route to the direct Anthropic/OpenAI API services instead of a
- * subscription or OpenRouter. OpenRouter's own catalog
- * (https://openrouter.ai/models) is far larger than any other provider's;
- * this list is only a starting point for all three services — users add any
- * other id, prefixed or not, as a custom model through the same
- * model-library flow every other provider uses.
+ * `openrouter-service-registry.ts`. An `anthropic:`/`openai:` *prefixed* id
+ * (colon right after the service name) instead routes to the direct
+ * Anthropic/OpenAI API, bypassing OpenRouter and needing its own separate
+ * key — almost nobody wants that, so none is offered here by default; add
+ * one as a custom model through the usual model-library flow once that
+ * key is set. OpenRouter's own catalog (https://openrouter.ai/models) is
+ * far larger than any other provider's; this list is only a starting
+ * point — every model it actually lists is reachable, free or paid, once
+ * an OpenRouter key is set (see `mergeLiveOpenRouterCatalog`).
  */
 export const OPENROUTER_PREDEFINED_MODELS: ProviderModelsDefinition = {
   OPTIONS: [
@@ -40,25 +43,32 @@ export const OPENROUTER_PREDEFINED_MODELS: ProviderModelsDefinition = {
       label: 'Gemini 3.8 Flash (OpenRouter)',
       description: 'Fast, low-cost Google model via OpenRouter.',
     },
+    // Claude and GPT, reached through OpenRouter's own catalog like every
+    // other paid model here — needs only the OpenRouter key, not a separate
+    // direct Anthropic/OpenAI one. Direct access to those two (a different,
+    // rarely-needed path — see the module doc comment) is reached by adding
+    // an `anthropic:`/`openai:`-prefixed id as a custom model, not offered
+    // as a default pick, since it needs its own key and most people never
+    // set one.
     {
-      value: 'anthropic:claude-opus-5-5',
-      label: 'Claude Opus 5.5 (direct Anthropic API)',
-      description: 'Billed per token on ANTHROPIC_DIRECT_API_KEY — not the Claude Code subscription.',
+      value: 'anthropic/claude-opus-5.5',
+      label: 'Claude Opus 5.5 (OpenRouter)',
+      description: 'Paid per token on your OpenRouter key.',
     },
     {
-      value: 'anthropic:claude-sonnet-5-5',
-      label: 'Claude Sonnet 5.5 (direct Anthropic API)',
-      description: 'Billed per token on ANTHROPIC_DIRECT_API_KEY — not the Claude Code subscription.',
+      value: 'anthropic/claude-sonnet-5.5',
+      label: 'Claude Sonnet 5.5 (OpenRouter)',
+      description: 'Paid per token on your OpenRouter key.',
     },
     {
-      value: 'openai:gpt-5.5',
-      label: 'GPT-5.5 (direct OpenAI API)',
-      description: 'Billed per token on OPENAI_DIRECT_API_KEY.',
+      value: 'openai/gpt-5.5',
+      label: 'GPT-5.5 (OpenRouter)',
+      description: 'Paid per token on your OpenRouter key.',
     },
     {
-      value: 'openai:gpt-5.4-mini',
-      label: 'GPT-5.4 mini (direct OpenAI API)',
-      description: 'Billed per token on OPENAI_DIRECT_API_KEY, cheaper/faster than the full model.',
+      value: 'openai/gpt-5.4-mini',
+      label: 'GPT-5.4 mini (OpenRouter)',
+      description: 'Paid per token on your OpenRouter key, cheaper/faster than the full model.',
     },
   ],
   DEFAULT: 'google/gemma-4-31b-it:free',

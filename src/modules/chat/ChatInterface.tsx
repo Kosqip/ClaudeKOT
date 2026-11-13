@@ -636,6 +636,7 @@ function ChatInterface({
           canAbortSession={canAbortSession}
           permissionMode={permissionMode}
           availablePermissionModes={availablePermissionModes}
+          isTextOnlyProvider={provider === 'openrouter'}
           onSelectPermissionMode={selectPermissionMode}
           providerLabel={selectedProviderLabel}
           effort={currentProviderEffort}

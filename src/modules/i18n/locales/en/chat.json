@@ -220,7 +220,8 @@
       "title": "Replacing an earlier message",
       "filesNotReverted": "files the agent already changed are not reverted",
       "cancel": "Cancel"
-    }
+    },
+    "textOnlyModeDescription": "This backend only exchanges text: it cannot run commands or edit files on its own."
   },
   "providerSelection": {
     "title": "Choose Your AI Assistant",

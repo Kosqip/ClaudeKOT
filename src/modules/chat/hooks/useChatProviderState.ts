@@ -9,7 +9,7 @@ import type { PendingPermissionRequest, PermissionMode,
   ProviderModelActions,
   ProviderModelOption,
   ProviderModelsDefinition } from '@/shared/types';
-import { DEFAULT_EFFORT_VALUE } from '@/shared/constants';
+import { CUSTOM_API_KEYS_CHANGED_EVENT, DEFAULT_EFFORT_VALUE } from '@/shared/constants';
 import { readSelectedProvider, writeSelectedProvider } from '@/shared/selectedProvider';
 
 const FALLBACK_PROVIDER_EFFORT_VALUES: Partial<Record<LLMProvider, readonly string[]>> = {
@@ -231,6 +231,15 @@ export function useChatProviderState({ selectedSession, selectedProject: _select
 
   useEffect(() => {
     void loadProviderModels();
+  }, [loadProviderModels]);
+
+  // A key saved or cleared from Settings while this page stayed open would
+  // otherwise never reach this already-fetched catalog (see the event's own
+  // doc comment in src/shared/constants.ts).
+  useEffect(() => {
+    const onKeysChanged = () => void loadProviderModels();
+    window.addEventListener(CUSTOM_API_KEYS_CHANGED_EVENT, onKeysChanged);
+    return () => window.removeEventListener(CUSTOM_API_KEYS_CHANGED_EVENT, onKeysChanged);
   }, [loadProviderModels]);
 
   useEffect(() => {
