@@ -456,6 +456,9 @@
       },
       "opencode": {
         "description": "OpenCode AI assistant"
+      },
+      "openrouter": {
+        "description": "OpenRouter is one key that unlocks models from hundreds of different providers (Google, DeepSeek, Meta, xAI and others), free ones included. The separate direct Anthropic/OpenAI keys are only for paying those two per token directly - most people do not need them. Set the keys below, right here in the interface."
       }
     },
     "connectionStatus": "Connection Status",
@@ -512,8 +515,8 @@
       "reLoginButton": "Re-login",
       "apiKeys": {
         "title": "Custom API keys",
-        "description": "Set each key here — OpenRouter, direct Anthropic, direct OpenAI — separately. Saved on the server; no need to edit the .env file by hand. A model only works once its service has a key.",
-        "openrouterLabel": "OpenRouter",
+        "description": "OpenRouter: one key unlocks models from hundreds of providers - Google, DeepSeek, Meta, xAI and more, free ones included. You almost always want this one. Direct Anthropic/OpenAI are separate paid keys for those two specifically; most people skip them. Saved on the server, no need to edit the .env file by hand.",
+        "openrouterLabel": "OpenRouter (hundreds of models, one key)",
         "anthropicLabel": "Anthropic (direct)",
         "openaiLabel": "OpenAI (direct)",
         "sourceUi": "Set here",
@@ -528,7 +531,7 @@
         "failedNotice": "Could not save — check the connection to the server.",
         "loadFailed": "Could not load the keys' status."
       },
-      "notInstalled": "{{agent}} is not installed on this computer — install the CLI itself first; the login window here will not help."
+      "notInstalled": "{{agent}} was not found as a command in this computer's terminal. If you have the OpenCode Desktop app installed, that looks like a different program: this needs the console version specifically (the opencode command). Check in PowerShell with \"opencode --version\" - if it is not recognized, install the CLI separately from opencode.ai/docs."
     },
     "error": "Error: {{error}}",
     "handoffThreshold": {

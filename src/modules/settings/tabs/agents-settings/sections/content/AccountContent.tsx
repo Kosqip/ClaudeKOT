@@ -58,7 +58,7 @@ const agentConfig: Record<AgentProvider, AgentVisualConfig> = {
   },
   openrouter: {
     name: 'Custom API',
-    description: 'HTTP API — OpenRouter, direct Anthropic, or direct OpenAI, selected per model by its prefix. Authenticated via an API key env var on the server, no CLI login.',
+    description: 'OpenRouter is one key that unlocks models from hundreds of different providers, free ones included. Set it below, right here in the interface.',
     bgClass: 'bg-teal-50 dark:bg-teal-900/20',
     borderClass: 'border-teal-200 dark:border-teal-800',
     textClass: 'text-teal-900 dark:text-teal-100',
@@ -218,7 +218,10 @@ export default function AccountContent({ agent, authStatus, onLogin }: AccountCo
             </div>
           )}
 
-          {authStatus.error && authStatus.installed !== false && (
+          {/* For openrouter this duplicates what each key row in CustomApiKeysForm
+              already says ("не задан" / "задан здесь") — showing both reads as
+              "still broken" right after a key was in fact just saved. */}
+          {agent !== 'openrouter' && authStatus.error && authStatus.installed !== false && (
             <div className="border-t border-border/50 pt-4">
               <div className="text-sm text-red-600 dark:text-red-400">
                 {t('agents.error', { error: authStatus.error })}
