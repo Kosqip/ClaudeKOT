@@ -455,7 +455,7 @@
         "description": "OpenAI Codex AI assistant"
       },
       "opencode": {
-        "description": "OpenCode CLI assistant"
+        "description": "OpenCode AI assistant"
       }
     },
     "connectionStatus": "Connection Status",
@@ -509,7 +509,10 @@
       "description": "Sign in to your {{agent}} account to enable AI features",
       "reAuthDescription": "Sign in with a different account or refresh credentials",
       "button": "Login",
-      "reLoginButton": "Re-login"
+      "reLoginButton": "Re-login",
+      "openRouterKeyTitle": "The key is set in the .env file",
+      "openRouterKeyDescription": "Open the .env file in the ClaudeKOT folder, add a line OPENROUTER_API_KEY=your_key, then restart npm start. The button below only checks again whether the key appeared.",
+      "recheckButton": "Check again"
     },
     "error": "Error: {{error}}",
     "handoffThreshold": {

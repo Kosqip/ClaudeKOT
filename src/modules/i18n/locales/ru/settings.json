@@ -405,6 +405,12 @@
       },
       "codex": {
         "description": "AI-ассистент OpenAI Codex"
+      },
+      "opencode": {
+        "description": "AI-ассистент OpenCode"
+      },
+      "openrouter": {
+        "description": "HTTP API — OpenRouter, Anthropic или OpenAI напрямую; какой из них — выбирается префиксом в названии модели. Ключ задаётся на сервере в файле .env, входа через браузер нет."
       }
     },
     "connectionStatus": "Статус подключения",
@@ -445,7 +451,10 @@
       "description": "Войдите в ваш аккаунт {{agent}} для включения AI функций",
       "reAuthDescription": "Войдите с другим аккаунтом или обновите учетные данные",
       "button": "Войти",
-      "reLoginButton": "Войти снова"
+      "reLoginButton": "Войти снова",
+      "openRouterKeyTitle": "Ключ задаётся в файле .env",
+      "openRouterKeyDescription": "Откройте файл .env в папке ClaudeKOT, впишите строку OPENROUTER_API_KEY=ваш_ключ и перезапустите npm start. Кнопка ниже просто проверяет ещё раз, появился ли ключ.",
+      "recheckButton": "Проверить снова"
     },
     "error": "Ошибка: {{error}}",
     "handoffThreshold": {

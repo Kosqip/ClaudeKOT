@@ -62,12 +62,13 @@ const getProviderCommand = ({
   return 'claude --dangerously-skip-permissions /login';
 };
 
-const getProviderTitle = (provider: LLMProvider) => {
-  if (provider === 'claude') return 'Claude CLI Login';
-  if (provider === 'cursor') return 'Cursor CLI Login';
-  if (provider === 'codex') return 'Codex CLI Login';
-  if (provider === 'opencode') return 'OpenCode CLI Login';
-  return 'Claude CLI Login';
+/** Named consistently with `agentConfig` in `AccountContent.tsx`; falls back to "Claude" for an unknown provider, like `getProviderCommand` above. */
+const PROVIDER_DISPLAY_NAME: Record<LLMProvider, string> = {
+  claude: 'Claude',
+  cursor: 'Cursor',
+  codex: 'Codex',
+  opencode: 'OpenCode',
+  openrouter: 'Custom API',
 };
 
 /** Used by the onboarding and settings modules to run a provider's CLI login command in an embedded shell. */
@@ -85,7 +86,7 @@ export default function ProviderLoginModal({
   }
 
   const command = getProviderCommand({ provider, customCommand, isAuthenticated });
-  const title = getProviderTitle(provider);
+  const title = t('common:misc.providerLoginTitle', { provider: PROVIDER_DISPLAY_NAME[provider] ?? PROVIDER_DISPLAY_NAME.claude });
 
   const handleComplete = (exitCode: number) => {
     onComplete?.(exitCode);

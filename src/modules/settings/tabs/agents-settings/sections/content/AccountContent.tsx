@@ -170,7 +170,32 @@ export default function AccountContent({ agent, authStatus, onLogin }: AccountCo
             subtextClass={config.subtextClass}
           />
 
-          {authStatus.method !== 'api_key' && (
+          {/* OpenRouter has no browser login flow: the key is set in the server's
+              .env file, so this shows that instruction and a recheck button
+              instead of the "Log in" button every other provider gets. */}
+          {agent === 'openrouter' && !authStatus.authenticated && (
+            <div className="border-t border-border/50 pt-4">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className={`font-medium ${config.textClass}`}>
+                    {t('agents.login.openRouterKeyTitle')}
+                  </div>
+                  <div className={`text-sm ${config.subtextClass}`}>
+                    {t('agents.login.openRouterKeyDescription')}
+                  </div>
+                </div>
+                <Button
+                  onClick={onLogin}
+                  className={`${config.buttonClass} text-white`}
+                  size="sm"
+                >
+                  {t('agents.login.recheckButton')}
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {agent !== 'openrouter' && authStatus.method !== 'api_key' && (
             <div className="border-t border-border/50 pt-4">
               <div className="flex items-center justify-between">
                 <div>

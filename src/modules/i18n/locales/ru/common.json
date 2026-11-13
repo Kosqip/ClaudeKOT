@@ -97,7 +97,9 @@
     "createProjectDesktop": "Создайте новый проект, нажав на значок папки на боковой панели",
     "newSession": "Новый сеанс",
     "untitledSession": "Безымянный сеанс",
-    "projectFiles": "Файлы проекта"
+    "projectFiles": "Файлы проекта",
+    "renameSessionHint": "{{title}} (двойной клик — переименовать)",
+    "renameSessionLabel": "Название сессии"
   },
   "fileTree": {
     "loading": "Загрузка файлов...",
@@ -134,7 +136,8 @@
       "refresh": "Обновить",
       "menuLabel": "Контекстное меню файла",
       "loading": "Загрузка..."
-    }
+    },
+    "loadFailed": "Не удалось загрузить файлы"
   },
   "projectWizard": {
     "title": "Создать новый проект",
@@ -238,6 +241,168 @@
       "updateAvailable": "Доступно обновление",
       "closeSidebar": "Закрыть боковую панель",
       "resizeSidebar": "Изменить ширину боковой панели"
+    },
+    "startingUpdate": "Запускаю обновление…",
+    "updateStartedRestarting": "Обновление запущено. Похоже, сервер перезапускается, чтобы его применить.",
+    "unexpectedResponse": "Сервер ответил неожиданно (HTTP {{status}}). Обновите вручную командой ниже.",
+    "connectionInterrupted": "Соединение с сервером прервалось — вероятно, он перезапускается, чтобы применить обновление.",
+    "unknownError": "Неизвестная ошибка",
+    "refreshNow": "Обновляю окно сейчас…",
+    "refreshIn_one": "Окно обновится через {{count}} секунду. Если обновление не применится, перезапустите окружение.",
+    "refreshIn_few": "Окно обновится через {{count}} секунды. Если обновление не применится, перезапустите окружение.",
+    "refreshIn_many": "Окно обновится через {{count}} секунд. Если обновление не применится, перезапустите окружение.",
+    "refreshIn_other": "Окно обновится через {{count}} секунды. Если обновление не применится, перезапустите окружение."
+  },
+  "notifications": {
+    "genericTool": "инструмент",
+    "codes": {
+      "generic": {
+        "info": {
+          "title": "Уведомление"
+        }
+      },
+      "permission": {
+        "required": {
+          "title": "Требуется действие",
+          "body": "{{toolName}} ждёт вашего решения."
+        }
+      },
+      "run": {
+        "stopped": {
+          "title": "Выполнение остановлено",
+          "body": "Причина: {{reason}}"
+        },
+        "failed": {
+          "title": "Выполнение не удалось"
+        }
+      },
+      "agent": {
+        "notification": {
+          "title": "Уведомление агента"
+        }
+      }
     }
-  }
+  },
+  "commandPalette": {
+    "title": "Палитра команд",
+    "pages": {
+      "actions": "Действия",
+      "files": "Файлы",
+      "sessions": "Сессии",
+      "commits": "Коммиты",
+      "branches": "Ветки"
+    },
+    "backToAll": "Назад ко всем",
+    "backspaceHint": "Backspace — назад",
+    "searchPage": "Искать: {{page}}…",
+    "searchAnything": "Начните вводить, чтобы найти что угодно…",
+    "noResults": "Ничего не найдено.",
+    "groupActions": "Действия",
+    "groupNavigate": "Переход",
+    "groupGit": "Git",
+    "groupSettings": "Настройки",
+    "groupSessions": "Сессии",
+    "groupFiles": "Файлы",
+    "groupCommits": "Коммиты",
+    "groupBranches": "Ветки",
+    "startNewChat": "Начать новый чат",
+    "selectProjectFirst": "Сначала выберите проект",
+    "openSettings": "Открыть настройки",
+    "toggleTheme": "Переключить тему",
+    "navChat": "Перейти в Чат",
+    "navFiles": "Перейти в Файлы",
+    "navShell": "Перейти в Терминал",
+    "navGit": "Перейти в Git",
+    "navTasks": "Перейти в Задачи",
+    "gitFetch": "Git: Получить",
+    "gitPull": "Git: Pull",
+    "gitPush": "Git: Push",
+    "settingsItem": "Настройки: {{label}}",
+    "browseAllSessions": "Показать все сессии ({{count}})",
+    "browseAllFiles": "Показать все файлы ({{count}})",
+    "browseAllCommits": "Показать все коммиты ({{count}})",
+    "browseAllBranches": "Показать все ветки ({{count}})",
+    "switchTo": "Переключиться на: {{name}}"
+  },
+  "folderBrowser": {
+    "title": "Выбор папки",
+    "hideHidden": "Скрыть скрытые папки",
+    "showHidden": "Показать скрытые папки",
+    "createNew": "Создать папку",
+    "newFolderPlaceholder": "Название новой папки",
+    "create": "Создать",
+    "loadFailed": "Не удалось загрузить папки",
+    "createFailed": "Не удалось создать папку",
+    "noSubfolders": "Вложенных папок нет",
+    "select": "Выбрать",
+    "pathLabel": "Путь:",
+    "useThisFolder": "Использовать эту папку"
+  },
+  "misc": {
+    "errorTitle": "Что-то пошло не так",
+    "errorDescription": "Произошла ошибка при загрузке окна чата.",
+    "errorDetails": "Подробности ошибки",
+    "tryAgain": "Повторить",
+    "projectFallback": "Проект",
+    "openMenu": "Открыть меню",
+    "noProjectSelected": "Проект не выбран",
+    "projectRequiredForShell": "Для открытия терминала нужен проект",
+    "completedBadge": "(Готово)",
+    "close": "Закрыть",
+    "hideToken": "Скрыть токен",
+    "showToken": "Показать токен",
+    "unknownProvider": "Неизвестно",
+    "browseFolders": "Выбрать папку",
+    "closeLoginModal": "Закрыть окно входа",
+    "pluginLoadFailed": "Не удалось загрузить плагин: {{error}}",
+    "providerLoginTitle": "Вход — {{provider}}"
+  },
+  "workflow": {
+    "title": "Поток задач",
+    "status": {
+      "running": "выполняется",
+      "completed": "готово",
+      "failed": "ошибка",
+      "stopped": "без результата"
+    },
+    "stoppedHint": "Выполнение завершилось раньше, чем этот поток отчитался",
+    "phases": "Этапы",
+    "agents": "Агенты",
+    "agentsFinished_one": "{{finished}} из {{count}} агента завершён",
+    "agentsFinished_few": "{{finished}} из {{count}} агентов завершено",
+    "agentsFinished_many": "{{finished}} из {{count}} агентов завершено",
+    "agentsFinished_other": "{{finished}} из {{count}} агентов завершено",
+    "agentsFailed": "ошибок: {{count}}",
+    "agentsProgress_one": "{{finished}}/{{count}} агент",
+    "agentsProgress_few": "{{finished}}/{{count}} агента",
+    "agentsProgress_many": "{{finished}}/{{count}} агентов",
+    "agentsProgress_other": "{{finished}}/{{count}} агента",
+    "agentStatus": {
+      "queued": "в очереди",
+      "running": "выполняется",
+      "completed": "готово",
+      "failed": "ошибка",
+      "stopped": "без результата"
+    },
+    "agentTokens": "токенов: {{tokens}}",
+    "agentToolCalls_one": "{{count}} вызов инструмента",
+    "agentToolCalls_few": "{{count}} вызова инструментов",
+    "agentToolCalls_many": "{{count}} вызовов инструментов",
+    "agentToolCalls_other": "{{count}} вызова инструментов",
+    "agentTimelineLoading": "Читаю шаги агента…",
+    "agentTimelineEmpty": "Пока ничего не записано",
+    "agentTimelineUnavailable": "Шаги недоступны: {{reason}}",
+    "usage": "{{toolUses}} обращений к инструментам · {{elapsed}}",
+    "currentAgent": "сейчас: {{label}}",
+    "result": "Результат",
+    "script": "Скрипт",
+    "backgroundTasks": "Фоновые задачи",
+    "backgroundAgent": "Агент",
+    "backgroundCommand": "Команда",
+    "backgroundMonitor": "Наблюдение",
+    "stopTask": "Остановить",
+    "taskRowNotLoaded": "Запущено раньше в этом разговоре; нажмите, чтобы загрузить",
+    "taskOfAgent": "Запущено одним из агентов этой сессии"
+  },
+  "cancel": "Отмена"
 }
