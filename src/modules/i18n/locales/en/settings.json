@@ -527,7 +527,8 @@
         "clearedNotice": "Key cleared.",
         "failedNotice": "Could not save — check the connection to the server.",
         "loadFailed": "Could not load the keys' status."
-      }
+      },
+      "notInstalled": "{{agent}} is not installed on this computer — install the CLI itself first; the login window here will not help."
     },
     "error": "Error: {{error}}",
     "handoffThreshold": {

@@ -50,7 +50,10 @@ export default function AgentConnectionCard({
           </div>
         </div>
 
-        {!status.authenticated && !status.loading && (
+        {/* installed === false: the CLI login button would only run a command
+            that does not exist; status.error (shown as statusText above)
+            already says it is not installed. */}
+        {!status.authenticated && !status.loading && status.installed !== false && (
           <button
             onClick={onLogin}
             className={`${loginButtonClassName} flex-shrink-0 rounded-lg px-4 py-1.5 text-sm font-medium text-white transition-colors`}

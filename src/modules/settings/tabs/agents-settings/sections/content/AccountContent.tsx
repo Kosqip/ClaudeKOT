@@ -177,7 +177,23 @@ export default function AccountContent({ agent, authStatus, onLogin }: AccountCo
               the badge above updates without a manual refresh. */}
           {agent === 'openrouter' && <CustomApiKeysForm onChanged={onLogin} />}
 
-          {agent !== 'openrouter' && authStatus.method !== 'api_key' && (
+          {/* installed === false means the CLI binary itself is missing: opening
+              the login modal would just run a command that does not exist
+              (e.g. PowerShell's "opencode : term not recognized"), which reads
+              as a crash rather than "please install this first". Shown
+              instead of the login button, whose click would do that. */}
+          {agent !== 'openrouter' && !authStatus.loading && authStatus.installed === false && (
+            <div className="border-t border-border/50 pt-4">
+              <div className="text-sm text-red-600 dark:text-red-400">
+                {t('agents.login.notInstalled', { agent: config.name })}
+              </div>
+              {authStatus.error && (
+                <div className={`mt-1 text-sm ${config.subtextClass}`}>{authStatus.error}</div>
+              )}
+            </div>
+          )}
+
+          {agent !== 'openrouter' && authStatus.installed !== false && authStatus.method !== 'api_key' && (
             <div className="border-t border-border/50 pt-4">
               <div className="flex items-center justify-between">
                 <div>
@@ -202,7 +218,7 @@ export default function AccountContent({ agent, authStatus, onLogin }: AccountCo
             </div>
           )}
 
-          {authStatus.error && (
+          {authStatus.error && authStatus.installed !== false && (
             <div className="border-t border-border/50 pt-4">
               <div className="text-sm text-red-600 dark:text-red-400">
                 {t('agents.error', { error: authStatus.error })}

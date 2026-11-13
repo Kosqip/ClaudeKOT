@@ -1466,6 +1466,14 @@ export type ProviderAuthStatus = {
   subscriptionOverride?: ProviderAuthSubscriptionOverride;
   /** Version the provider's CLI printed for `--version`; null when unknown, absent until the server has answered. */
   installedVersion?: string | null;
+  /**
+   * Whether the provider's CLI binary is on the server's PATH at all, absent
+   * until the server has answered. `AccountContent` uses this (rather than
+   * `authenticated`/`error` alone) to tell "not installed" apart from "not
+   * logged in" — opening the CLI login modal for a provider that is not
+   * installed would only run a command that does not exist.
+   */
+  installed?: boolean;
 };
 
 /** The authentication state of every CLI provider at once, keyed by LLMProvider, so onboarding and settings can render each provider's connected, loading and error state from one object returned by useProviderAuthStatus. */

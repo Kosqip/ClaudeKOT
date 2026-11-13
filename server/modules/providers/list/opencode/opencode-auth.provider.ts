@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
+import { NOT_INSTALLED_MESSAGE } from '@/modules/providers/list/opencode/opencode-runtime.provider.js';
 import type { IProviderAuth } from '@/shared/interfaces.js';
 import type { CliVersionProbe, ProviderAuthStatus } from '@/shared/types.js';
 import { probeCliVersion, readObjectRecord, readOptionalString } from '@/shared/utils.js';
@@ -37,8 +38,25 @@ export class OpenCodeProviderAuth implements IProviderAuth {
    */
   async getStatus(): Promise<ProviderAuthStatus> {
     const { installed, version: installedVersion } = this.checkInstalled();
-    const credentials = await this.checkCredentials();
 
+    // A leftover auth.json from a previous install must not read as
+    // "authenticated" once the binary itself is gone — chat turns would
+    // still fail, and the settings page showed "Connected" for a backend
+    // that could not actually run (the CLI login modal would then run a
+    // command that does not exist).
+    if (!installed) {
+      return {
+        installed,
+        provider: 'opencode',
+        installedVersion,
+        authenticated: false,
+        email: null,
+        method: null,
+        error: NOT_INSTALLED_MESSAGE,
+      };
+    }
+
+    const credentials = await this.checkCredentials();
     return {
       installed,
       provider: 'opencode',

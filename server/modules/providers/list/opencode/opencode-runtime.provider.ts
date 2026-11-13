@@ -93,7 +93,8 @@ const reportRunFailed = notifyRunFailed as (input: AnyRecord) => void;
 
 const PROVIDER = 'opencode';
 
-const NOT_INSTALLED_MESSAGE = 'OpenCode CLI is not installed. Install it from https://opencode.ai/docs/';
+/** Also used by `opencode-auth.provider.ts`, whose status this mirrors when the CLI is missing. */
+export const NOT_INSTALLED_MESSAGE = 'OpenCode CLI is not installed. Install it from https://opencode.ai/docs/';
 
 /**
  * First OpenCode release with both APIs the runtime answers through: the

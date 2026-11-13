@@ -27,6 +27,7 @@ type ProviderAuthStatusPayload = {
   error?: string | null;
   subscriptionOverride?: ProviderAuthSubscriptionOverride | null;
   installedVersion?: string | null;
+  installed?: boolean;
 };
 
 type ProviderAuthStatusApiResponse = {
@@ -57,6 +58,7 @@ const toProviderAuthStatus = (
   // Servers older than this field leave it out; keep it absent rather than
   // claiming the version is unknown.
   ...(payload.installedVersion !== undefined ? { installedVersion: payload.installedVersion } : {}),
+  ...(payload.installed !== undefined ? { installed: payload.installed } : {}),
 });
 
 type UseProviderAuthStatusOptions = {
