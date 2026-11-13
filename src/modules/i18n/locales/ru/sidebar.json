@@ -60,7 +60,8 @@
     "cancel": "Отмена",
     "clearSearch": "Очистить поиск",
     "openCommandPalette": "Открыть палитру команд",
-    "attentionRequiredIndicator": "Сессия требует внимания"
+    "attentionRequiredIndicator": "Сессия требует внимания",
+    "backgroundWorkIndicator": "Выполняется фоновая работа"
   },
   "navigation": {
     "chat": "Чат",
@@ -128,7 +129,9 @@
     "deleteSessionsPartialFailure_one": "Не удалось удалить {{count}} сеанс из {{total}}. Попробуйте снова.",
     "deleteSessionsPartialFailure_few": "Не удалось удалить {{count}} сеанса из {{total}}. Попробуйте снова.",
     "deleteSessionsPartialFailure_many": "Не удалось удалить {{count}} сеансов из {{total}}. Попробуйте снова.",
-    "deleteSessionsPartialFailure_other": "Не удалось удалить {{count}} сеансов из {{total}}. Попробуйте снова."
+    "deleteSessionsPartialFailure_other": "Не удалось удалить {{count}} сеансов из {{total}}. Попробуйте снова.",
+    "archiveSessionFailed": "Не удалось заархивировать сессию. Попробуйте ещё раз.",
+    "archiveSessionError": "Ошибка при архивации сессии. Попробуйте ещё раз."
   },
   "version": {
     "updateAvailable": "Доступно обновление",
@@ -183,6 +186,16 @@
     "archiveSessionsNotice_one": "Архивирование убирает сеанс из активного списка, сохраняя его историю.",
     "archiveSessionsNotice_few": "Архивирование убирает сеансы из активного списка, сохраняя их историю.",
     "archiveSessionsNotice_many": "Архивирование убирает сеансы из активного списка, сохраняя их историю.",
-    "archiveSessionsNotice_other": "Архивирование убирает сеансы из активного списка, сохраняя их историю."
+    "archiveSessionsNotice_other": "Архивирование убирает сеансы из активного списка, сохраняя их историю.",
+    "confirmDeleteSession": "Удалить навсегда",
+    "deleteSessionNotice": "Сессия и её история будут удалены. Действие необратимо."
+  },
+  "recent": {
+    "title": "Недавние разговоры",
+    "emptyTitle": "Разговоров пока нет",
+    "emptyDescription": "Здесь появятся ваши недавно обновлённые разговоры.",
+    "loadFailed": "Не удалось загрузить недавние разговоры",
+    "loadMore": "Загрузить более старые разговоры",
+    "loadingMore": "Загружаю ещё…"
   }
 }

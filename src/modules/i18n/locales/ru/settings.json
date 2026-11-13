@@ -4,7 +4,8 @@
     "account": "Аккаунт",
     "permissions": "Разрешения",
     "mcpServers": "MCP серверы",
-    "appearance": "Внешний вид"
+    "appearance": "Внешний вид",
+    "skills": "Навыки"
   },
   "account": {
     "title": "Аккаунт",
@@ -88,7 +89,8 @@
         "skills": "Навыки"
       },
       "insertTitle": "Вставить {{command}} в чат"
-    }
+    },
+    "voiceEnabled": "Голос (микрофон + озвучивание)"
   },
   "terminalShortcuts": {
     "title": "Горячие клавиши терминала",
@@ -114,7 +116,9 @@
     "tasks": "Задачи",
     "notifications": "Уведомления",
     "plugins": "Плагины",
-    "about": "О программе"
+    "about": "О программе",
+    "voice": "Голос",
+    "browser": "Browser"
   },
   "notifications": {
     "title": "Уведомления",
@@ -194,6 +198,13 @@
         "notConfigured": "Сначала сохраните URL вебхука.",
         "requestFailed": "Запрос не выполнен. Попробуйте ещё раз."
       }
+    },
+    "desktop": {
+      "title": "Уведомлять это приложение",
+      "enable": "Включить уведомления",
+      "disable": "Отключить уведомления",
+      "enabled": "Уведомления для этого приложения включены",
+      "unsupported": "Уведомления рабочего стола не поддерживаются этой системой."
     }
   },
   "appearanceSettings": {
@@ -236,6 +247,11 @@
         "label": "Размер шрифта",
         "description": "Размер шрифта редактора в пикселях"
       }
+    },
+    "keepProjectsExpanded": {
+      "section": "Боковая панель",
+      "label": "Держать проекты развёрнутыми",
+      "description": "Открывайте сразу несколько проектов и запоминайте их после перезагрузки."
     }
   },
   "mcpForm": {
@@ -285,7 +301,24 @@
       "saving": "Сохранение...",
       "addServer": "Добавить сервер",
       "updateServer": "Обновить сервер"
-    }
+    },
+    "scopes": {
+      "userGlobal": "Пользователь (глобально)",
+      "userAllProviders": "Пользователь (все бэкенды)",
+      "local": "Локально для Claude",
+      "project": "Проект",
+      "projectAllProviders": "Проект (все бэкенды)",
+      "userGlobalDesc": "Доступно во всех проектах на этом компьютере",
+      "userAllProvidersDesc": "Записывается в пользовательский конфиг каждого бэкенда и доступно во всех проектах на этом компьютере",
+      "localDesc": "Хранится в пользовательских настройках Claude для выбранного проекта",
+      "projectDesc": "Хранится в рабочей папке выбранного проекта",
+      "projectAllProvidersDesc": "Записывается в рабочую папку выбранного проекта для каждого бэкенда"
+    },
+    "unsupportedTransport": "«Добавить MCP сервер» поддерживает только stdio и http для всех бэкендов, не {{transport}}.",
+    "addToProvider": "{{action}} в {{provider}}",
+    "workingDirectory": "Рабочая папка",
+    "envVarNames": "Имена переменных окружения",
+    "bearerTokenEnvVar": "Переменная окружения с Bearer-токеном"
   },
   "saveStatus": {
     "success": "Настройки успешно сохранены!",
@@ -510,6 +543,19 @@
         "hands": "Руки",
         "routine": "Рутина"
       }
+    },
+    "subscriptionOverride": {
+      "title": "Вход по подписке сейчас не используется",
+      "description": "{{variable}} задана в {{source}}, поэтому Claude Code выставляет счёт за каждый запрос по этому ключу как за обычный API, а не использует вашу подписку.",
+      "descriptionWithEmail": "{{variable}} задана в {{source}}, поэтому Claude Code выставляет счёт за каждый запрос по этому ключу как за обычный API, а не использует вашу подписку ({{email}}).",
+      "source": {
+        "process_env": "окружении сервера",
+        "settings_file": "~/.claude/settings.json"
+      },
+      "fix": {
+        "process_env": "Чтобы использовать подписку, уберите {{variable}} там, где запускается сервер (.env, профиль оболочки, unit-файл службы), и перезапустите сервер.",
+        "settings_file": "Чтобы использовать подписку, уберите {{variable}} из блока «env» в ~/.claude/settings.json."
+      }
     }
   },
   "permissions": {
@@ -612,7 +658,8 @@
     "description": {
       "claude": "Серверы Model Context Protocol предоставляют дополнительные инструменты и источники данных для Claude",
       "cursor": "Серверы Model Context Protocol предоставляют дополнительные инструменты и источники данных для Cursor",
-      "codex": "Серверы Model Context Protocol предоставляют дополнительные инструменты и источники данных для Codex"
+      "codex": "Серверы Model Context Protocol предоставляют дополнительные инструменты и источники данных для Codex",
+      "opencode": "Серверы Model Context Protocol дают OpenCode дополнительные инструменты и источники данных"
     },
     "addButton": "Добавить MCP сервер",
     "empty": "MCP серверы не настроены",
@@ -639,6 +686,10 @@
     "help": {
       "title": "О Codex MCP",
       "description": "Codex поддерживает MCP серверы на основе stdio. Вы можете добавлять серверы, которые расширяют возможности Codex дополнительными инструментами и ресурсами."
+    },
+    "managed": {
+      "badge": "Управляется",
+      "hint": "Управляется ClaudeKOT."
     }
   },
   "pluginSettings": {
@@ -676,12 +727,146 @@
     "installAriaLabel": "URL git-репозитория плагина",
     "tab": "вкладка",
     "runningStatus": "запущен",
-    "thirdPartyNote": "Все плагины из списка ниже сделаны сторонними авторами для исходного проекта CloudCLI, а не командой ClaudeKOT: плагин — это чужой код, который получает доступ к вашему серверу и файлам."
+    "thirdPartyNote": "Все плагины из списка ниже сделаны сторонними авторами для исходного проекта CloudCLI, а не командой ClaudeKOT: плагин — это чужой код, который получает доступ к вашему серверу и файлам.",
+    "starterPluginLabel": "Стартовый плагин",
+    "sections": {
+      "officialTitle": "Официальные плагины",
+      "officialDescription": "Поддерживаются командой CloudCLI, готовы к установке напрямую.",
+      "unofficialTitle": "Остальные плагины",
+      "unofficialDescription": "Неофициальные плагины и интеграции от других пользователей. Проверьте исходный код перед установкой."
+    },
+    "terminalPlugin": {
+      "name": "Терминал",
+      "badge": "официальный",
+      "description": "Встроенный терминал с полным доступом к оболочке прямо в интерфейсе.",
+      "install": "Установить"
+    },
+    "scheduledPromptPlugin": {
+      "name": "Отложенные запросы",
+      "badge": "неофициальный",
+      "description": "Планирование запросов по расписанию, история запусков, управление повторяющимися локальными задачами.",
+      "install": "Установить"
+    },
+    "prismCloudCLI": {
+      "name": "PRISM CloudCLI",
+      "badge": "неофициальный",
+      "description": "Аналитика сессий Claude Code прямо в CloudCLI. Видно, почему сессия тратит токены, не выходя из браузера.",
+      "install": "Установить"
+    },
+    "sessionManagerPlugin": {
+      "name": "Сессии",
+      "badge": "неофициальный",
+      "description": "Просмотр, управление и остановка активных сессий Claude Code.",
+      "install": "Установить"
+    },
+    "tokenCostCalculatorPlugin": {
+      "name": "Калькулятор стоимости токенов",
+      "badge": "неофициальный",
+      "description": "Расчёт стоимости API по ценам моделей и расходу токенов, с готовыми ценами на популярные модели.",
+      "install": "Установить"
+    },
+    "taskQueuePlugin": {
+      "name": "Очередь задач",
+      "badge": "неофициальный",
+      "description": "Панель очереди задач: просмотр, фильтрация и запуск задач агента.",
+      "install": "Установить"
+    },
+    "githubIssuesBoardPlugin": {
+      "name": "Доска GitHub Issues",
+      "badge": "неофициальный",
+      "description": "Канбан-доска для GitHub Issues с двусторонней синхронизацией TaskMaster и автоустановкой skill /github-task",
+      "install": "Установить"
+    },
+    "claudeUsagePlugin": {
+      "name": "Расход Claude",
+      "badge": "неофициальный",
+      "description": "Лимиты тарифа Claude Code в реальном времени и история токенов и стоимости за 30 дней.",
+      "install": "Установить"
+    },
+    "codexUsagePlugin": {
+      "name": "Расход Codex",
+      "badge": "неофициальный",
+      "description": "Лимиты тарифа Codex в реальном времени, время сброса и активность токенов аккаунта за 30 дней.",
+      "install": "Установить"
+    },
+    "glmUsagePlugin": {
+      "name": "Расход GLM",
+      "badge": "неофициальный",
+      "description": "Квоты тарифа GLM/Zhipu в реальном времени и история токенов за 30 дней.",
+      "install": "Установить"
+    },
+    "agentMonitorPlugin": {
+      "name": "Монитор агентов",
+      "badge": "неофициальный",
+      "description": "Показывает фоновые субагенты и оболочки, которые продолжают работать после завершения чата, и даёт их остановить.",
+      "install": "Установить"
+    }
   },
   "skillsPage": {
     "addToAllProviders": "Добавить этот навык и для остальных бэкендов, которые поддерживают навыки",
     "errors": {
-      "globalAddPartial": "Добавлено, кроме: {{providers}}"
+      "globalAddPartial": "Добавлено, кроме: {{providers}}",
+      "tooManyFiles": "Папка навыка может содержать не более {{max}} файлов.",
+      "tooLarge": "Выбранные папки навыков должны весить менее 30 МБ суммарно.",
+      "noSkillMd": "В выбранной папке нет файла SKILL.md.",
+      "couldNotReadSkillMd": "Не удалось прочитать SKILL.md из {{folder}}.",
+      "readFailed": "Не удалось прочитать папку навыка",
+      "dropMarkdown": "Перетащите один или несколько markdown-файлов или папку с SKILL.md.",
+      "addFirst": "Сначала добавьте один или несколько markdown-файлов.",
+      "importFailed": "Не удалось импортировать навыки"
+    },
+    "description": "Управление навыками {{provider}}: локальные файлы, целые папки и расположения с учётом проекта.",
+    "searchPlaceholder": "Поиск навыков…",
+    "searchAriaLabel": "Поиск навыков",
+    "clearSearch": "Очистить поиск навыков",
+    "addSkill": "Добавить навык",
+    "refresh": "Обновить",
+    "scanningProjectSkills": "Сканирую навыки проекта…",
+    "addDialogTitle": "Добавить навык для {{provider}}",
+    "addDialogDescription": "Загрузите файл SKILL.md или целую папку навыка.",
+    "closeDialog": "Закрыть окно добавления навыка",
+    "savedSuccessfully": "Навыки успешно сохранены.",
+    "footerHint": "При загрузке папки сохраняется её имя; для отдельных файлов берётся `name` из `SKILL.md`.",
+    "installWithCount_one": "Установить {{count}} навык",
+    "installWithCount_few": "Установить {{count}} навыка",
+    "installWithCount_many": "Установить {{count}} навыков",
+    "installWithCount_other": "Установить {{count}} навыка",
+    "installPlain": "Установить навык",
+    "loading": "Загружаю навыки {{provider}}…",
+    "emptyTitle": "Навыков пока не найдено",
+    "emptyDescription": "Добавьте глобальный навык выше или создайте папки навыков для конкретного проекта в рабочей папке.",
+    "noMatchTitle": "Подходящих навыков нет",
+    "noMatchDescription": "Попробуйте другую команду, название, область, проект или путь источника.",
+    "count_one": "{{count}} навык",
+    "count_few": "{{count}} навыка",
+    "count_many": "{{count}} навыков",
+    "count_other": "{{count}} навыка",
+    "noDescription": "В заголовке навыка описание не указано.",
+    "pluginBadge": "Плагин: {{name}}",
+    "projectBadge": "Проект: {{name}}",
+    "source": "Источник",
+    "upload": {
+      "dropTitle": "Перетащите папку навыка или SKILL.md",
+      "dropHint": "Папка может содержать скрипты, справочные материалы и ресурсы.",
+      "chooseFiles": "Выбрать файлы",
+      "chooseFolder": "Выбрать папку",
+      "readyToInstall": "Готово к установке",
+      "filesCount_one": "{{count}} файл",
+      "filesCount_few": "{{count}} файла",
+      "filesCount_many": "{{count}} файлов",
+      "filesCount_other": "{{count}} файла",
+      "markdownFile": "Markdown-файл",
+      "removeFile": "Убрать {{name}}",
+      "hideInstallLocation": "Скрыть место установки",
+      "whereToInstall": "Куда это установится?"
+    },
+    "scopes": {
+      "user": "Пользователь",
+      "plugin": "Плагин",
+      "repo": "Репозиторий",
+      "project": "Проект",
+      "admin": "Админ",
+      "system": "Система"
     }
   },
   "about": {
@@ -693,6 +878,149 @@
     "diagnosticsDownload": "Сохранить отчёт",
     "diagnosticsCopy": "Скопировать",
     "diagnosticsCopied": "Скопировано",
-    "diagnosticsFailed": "Не удалось собрать отчёт"
+    "diagnosticsFailed": "Не удалось собрать отчёт",
+    "starOnGitHub": "Отметить звездой на GitHub",
+    "docs": "Документация",
+    "hostedTitle": "Попробовать CloudCLI Hosted",
+    "hostedDescription": "Командная работа, общие настройки MCP, синхронизация настроек между средами и управляемая инфраструктура.",
+    "learnMore": "Подробнее",
+    "proFeaturesTitle": "Возможности CloudCLI Pro",
+    "syncSettingsTitle": "Синхронизация настроек",
+    "syncSettingsDescription": "Синхронизируйте настройки, конфиги MCP и тему между всеми вашими средами.",
+    "teamManagementTitle": "Управление командой",
+    "teamManagementDescription": "Несколько пользователей, доступ по ролям и общие проекты для вашей команды.",
+    "proCta": "Доступно в CloudCLI Pro"
+  },
+  "voiceSettings": {
+    "title": "Голос",
+    "description": "Голосовой ввод и озвучивание ответов через аудио-бэкенд, совместимый с OpenAI.",
+    "enable": "Включить голос",
+    "enableDescription": "Показывать кнопку микрофона и кнопку озвучивания сообщений.",
+    "backendTitle": "Бэкенд",
+    "backendDescription": "Укажите OpenAI, Groq или локальный сервер (LocalAI, Speaches, Kokoro-FastAPI). Оставьте пустым, чтобы использовать значение сервера по умолчанию.",
+    "baseUrl": "Базовый URL",
+    "apiKey": "Ключ API",
+    "sttModel": "Модель распознавания речи",
+    "ttsModel": "Модель озвучивания текста",
+    "voice": "Голос",
+    "format": "Формат аудио",
+    "note": "Свой базовый URL вызывается напрямую из браузера и должен разрешать CORS-запросы из браузера. Оставьте пустым, чтобы использовать бэкенд, настроенный на сервере."
+  },
+  "browserUse": {
+    "title": "Browser",
+    "subtitle": "Наблюдение за сессиями браузера, которые открывают AI-агенты.",
+    "openSettings": "Открыть настройки Browser",
+    "refreshSessions": "Обновить сессии браузера",
+    "runtimeDisabled": "Отключено",
+    "runtimeReady": "Готово",
+    "runtimeInstalling": "Установка",
+    "runtimeSetupRequired": "Нужна настройка",
+    "loadFailed": "Не удалось загрузить Browser",
+    "actionFailed": "Действие в браузере не удалось",
+    "inputPlaceholder": "Введите текст и нажмите Enter, чтобы отправить его на страницу",
+    "inputSend": "Отправить",
+    "inputEnter": "Enter",
+    "inputTab": "Tab",
+    "inputBackspace": "Backspace",
+    "inputHint": "Нажмите на скриншот, чтобы кликнуть на странице, либо сфокусируйте его и используйте стрелки (Shift — для больших шагов), затем Enter или пробел.",
+    "surfaceAriaLabel": "Скриншот браузера. Стрелки перемещают курсор, Enter или пробел — клик.",
+    "requestFailed": "Запрос не удался ({{status}})",
+    "never": "Никогда",
+    "unknown": "Неизвестно",
+    "justNow": "Только что",
+    "secondsAgo": "{{n}} с назад",
+    "minutesAgo": "{{n}} мин назад",
+    "hoursAgo": "{{n}} ч назад",
+    "daysAgo": "{{n}} дн назад",
+    "noPageLoaded": "Страница не загружена",
+    "waitingAction": "Ожидание",
+    "emptyTitleEnabled": "Сессий браузера пока нет",
+    "emptyTitleDisabled": "Browser отключён",
+    "emptyDescEnabled": "Сессии браузера агента появятся здесь, пока задача использует Browser.",
+    "emptyDescDisabled": "Включите Browser в настройках, чтобы агенты могли открывать отслеживаемые сессии браузера.",
+    "runtimeSetupTitle": "Нужна настройка среды выполнения",
+    "installing": "Устанавливаю…",
+    "installRuntime": "Установить среду выполнения",
+    "promptLabel": "Запрос",
+    "prompt1": "Используй Browser, чтобы проверить процесс оформления заказа, и сообщи о любых сломанных элементах интерфейса.",
+    "prompt2": "Открой <url> через Browser, провзаимодействуй со страницей и опиши, что изменилось после каждого шага.",
+    "screenshotAlt": "Скриншот сессии браузера",
+    "waitingScreenshot": "Ожидание скриншота",
+    "waitingScreenshotHint": "Здесь появится следующий снимок браузера агента.",
+    "activeCount": "активных: {{n}}",
+    "totalCount": "всего: {{n}}",
+    "updated": "Обновлено {{time}}",
+    "statusEmpty": "пусто",
+    "fullScreen": "На весь экран",
+    "stopSession": "Остановить сессию",
+    "deleteSession": "Удалить сессию",
+    "sessions": "Сессии",
+    "noSessions": "Сессий браузера агента нет.",
+    "selected": "Выбрано",
+    "statusLabel": "Статус",
+    "none": "Нет",
+    "lastAction": "Последнее действие",
+    "profileLabel": "Профиль",
+    "temporaryProfile": "Временный",
+    "stop": "Остановить",
+    "delete": "Удалить",
+    "sessionFallback": "Сессия браузера",
+    "close": "Закрыть",
+    "statusReadySession": "готова",
+    "statusStoppedSession": "остановлена",
+    "statusUnavailableSession": "недоступна",
+    "installFailed": "Не удалось установить среду выполнения браузера"
+  },
+  "browserUseSettings": {
+    "sectionTitle": "Browser",
+    "sectionDescription": "Разрешить агентам создавать защищённые сессии браузера Playwright, за которыми можно наблюдать во вкладке Browser.",
+    "enableLabel": "Включить Browser",
+    "enableDescription": "Включает Browser для поддерживаемых бэкендов. Агенты смогут создавать сессии браузера; вы сможете наблюдать, останавливать и удалять их.",
+    "enableAriaLabel": "Включить Browser",
+    "playwrightLabel": "Playwright",
+    "chromiumLabel": "Chromium",
+    "statusPrefix": "Статус",
+    "checking": "проверка…",
+    "installed": "установлен",
+    "missing": "отсутствует",
+    "ready": "готов",
+    "setupRequired": "нужна настройка",
+    "disabled": "отключён",
+    "runtimeRequiredTitle": "Нужна среда выполнения браузера",
+    "runtimeRequiredFallback": "Установите среду выполнения браузера, прежде чем агенты смогут создавать сессии Browser.",
+    "installing": "Устанавливаю…",
+    "installRuntime": "Установить среду выполнения",
+    "loadSettingsFailed": "Не удалось загрузить настройки Browser",
+    "loadStatusFailed": "Не удалось загрузить статус Browser",
+    "saveFailed": "Не удалось сохранить настройки Browser",
+    "installFailed": "Не удалось установить среду выполнения браузера"
+  },
+  "mcpServersAdd": {
+    "menuLabel": "Добавить MCP сервер",
+    "globalButtonLabel": "Добавить глобальный MCP сервер",
+    "providerButtonLabel": "Добавить MCP сервер для {{provider}}",
+    "globalAddDescription": "Добавление глобального MCP сервера записывает один общий stdio- или HTTP-сервер для Claude, Cursor, Codex и OpenCode.",
+    "providerAddDescription": "{{button}} меняет только {{provider}}.",
+    "globalModalDescription": "Добавляет этот MCP сервер для всех бэкендов: Claude, Cursor, Codex и OpenCode. Поддерживаются только транспорты stdio и HTTP, потому что одна и та же настройка должна работать для всех бэкендов.",
+    "refreshingScopes": "Обновляю области проекта…",
+    "loadingServers": "Загружаю MCP серверы…",
+    "configCwd": "Рабочая папка",
+    "configEnvVars": "Переменные окружения"
+  },
+  "mcpTeamCard": {
+    "title": "Командные настройки MCP",
+    "description": "Делитесь настройками MCP серверов со своей командой. Все остаются синхронизированы автоматически.",
+    "proLink": "Доступно в CloudCLI Pro"
+  },
+  "mcpServersAddErrors": {
+    "loadFailedProvider": "Не удалось загрузить MCP серверы для {{provider}}",
+    "deleteFailed": "Не удалось удалить MCP сервер",
+    "saveFailed": "Не удалось сохранить MCP сервер",
+    "saveGlobalFailed": "Не удалось сохранить MCP сервер для всех бэкендов",
+    "selectProjectRequired": "Выберите проект для MCP серверов в области проекта",
+    "globalScopeUnsupported": "«Добавить MCP сервер» поддерживает только область пользователя или проекта для всех бэкендов.",
+    "globalAddFailed": "Не удалось добавить MCP сервер для всех бэкендов. {{details}}",
+    "deleteConfirm": "Удалить этот MCP сервер?",
+    "unknownError": "Неизвестная ошибка"
   }
 }
