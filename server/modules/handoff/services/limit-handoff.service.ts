@@ -348,7 +348,8 @@ export async function handoffSessionOnLimit(
   input: {
     fromSessionId: string;
     userId: number;
-    reason: ProviderLimitReason;
+    /** Required for `continue`/`standby`; a `manual` switch has no limit reason to carry. */
+    reason?: ProviderLimitReason;
     /** Defaults to `continue`. */
     mode?: LimitHandoffMode;
     /** When the original provider's limit resets (ISO), if it said. */
@@ -395,16 +396,22 @@ export async function handoffSessionOnLimit(
 
   const contextFilePath = await writeHandoffContextFile(toSessionId, historyText);
 
-  const openingMessage = mode === 'continue'
+  // The previous agent may have been cut off mid-task (continue/manual) or simply
+  // interrupted between turns (manual) — what it says it did and what is on disk
+  // can differ either way.
+  const checkFolderFirst = 'The previous backend may have left this mid-task. Before redoing or building on any step, check the actual state of the working folder (for example `git status` and `git diff`) and trust it over the conversation.';
+
+  const openingMessage = mode === 'standby'
     ? [
-      `[Continued automatically: the previous backend hit ${REASON_LABEL[input.reason]}.]`,
-      `The prior conversation is saved at ${contextFilePath} — read it first, then continue from where it leaves off.`,
-      // The previous agent was cut off mid-task: what it says it did and what is on disk can differ.
-      'The previous backend was interrupted and may have left changes half-made. Before redoing or building on any step, check the actual state of the working folder (for example `git status` and `git diff`) and trust it over the conversation.',
+      `[Switched: the previous backend is close to ${REASON_LABEL[input.reason!]}.]`,
+      `The prior conversation is saved at ${contextFilePath} — read it so you have the context. Its last turn finished normally, so do not start any work yet: reply briefly that you are ready and wait for the next instruction.`,
     ].join('\n\n')
     : [
-      `[Switched: the previous backend is close to ${REASON_LABEL[input.reason]}.]`,
-      `The prior conversation is saved at ${contextFilePath} — read it so you have the context. Its last turn finished normally, so do not start any work yet: reply briefly that you are ready and wait for the next instruction.`,
+      mode === 'manual'
+        ? '[Switched: the user asked for this conversation to continue on a different backend.]'
+        : `[Continued automatically: the previous backend hit ${REASON_LABEL[input.reason!]}.]`,
+      `The prior conversation is saved at ${contextFilePath} — read it first, then continue from where it leaves off.`,
+      checkFolderFirst,
     ].join('\n\n');
 
   const dispatch = await startDetachedChatTurn(

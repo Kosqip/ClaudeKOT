@@ -556,6 +556,14 @@
       "pausedRestart": "The server was restarted in the middle of the task. Finished parts are kept — press \"Continue now\" and only the rest is done.",
       "coordinatorMoved": "{{provider}} now leads the task: the previous orchestrator ran out of usage.",
       "movedFrom": "taken over from {{providers}} after its limit"
+    },
+    "switchBackend": {
+      "label": "Switch backend",
+      "description": "Continue this conversation on a different backend. This is not technically the same session underneath - Claude, Codex, Custom API and the rest share no memory with each other - a new, linked session opens with this conversation handed to it, and the new backend picks the work up from there.",
+      "choose": "Choose a backend…",
+      "switch": "Switch",
+      "switching": "Switching…",
+      "failed": "The switch could not be started."
     }
   }
 }

@@ -320,10 +320,12 @@ export const api = {
     resume: (runId: string) => post(`/api/orchestrator/runs/${encodeURIComponent(runId)}/resume`, {}),
   },
 
-  // Moves a session's conversation to the next backend in the user's
-  // fallback order. Used by the chat's "switch backend" suggestion banner.
+  // Moves a session's conversation to a fallback backend - the next one in
+  // the user's fallback order (reason required), or, with mode "manual" and
+  // an explicit single-entry fallbackOrder, whichever backend the user
+  // picked. Used by HandoffSuggestionBanner and SwitchBackendPanel.
   handoff: {
-    trigger: (body: { sessionId: string; reason: string; mode?: 'continue' | 'standby' }) =>
+    trigger: (body: { sessionId: string; reason?: string; mode?: 'continue' | 'standby' | 'manual'; fallbackOrder?: string[] }) =>
       post('/api/handoff/trigger', body),
   },
 

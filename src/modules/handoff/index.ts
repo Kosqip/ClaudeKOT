@@ -9,3 +9,7 @@ export { default as HandoffFallbackOrderSetting } from '@/modules/handoff/Handof
 // HandoffSuggestionBanner: the "move this conversation to <fallback>?" offer
 // ChatInterface shows when a session's backend is close to its usage limit.
 export { default as HandoffSuggestionBanner } from '@/modules/handoff/HandoffSuggestionBanner.js';
+
+// SwitchBackendPanel: lets ChatInterface offer a backend switch at any time,
+// not only when a usage limit is involved.
+export { default as SwitchBackendPanel } from '@/modules/handoff/SwitchBackendPanel.js';

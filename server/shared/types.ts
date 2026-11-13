@@ -1883,7 +1883,8 @@ export type LimitHandoffResult = {
   fromProvider: LLMProvider;
   toSessionId: string;
   toProvider: LLMProvider;
-  reason: ProviderLimitReason;
+  /** Absent for a `manual` switch, which has no usage/rate-limit reason. */
+  reason?: ProviderLimitReason;
   mode: LimitHandoffMode;
 };
 
@@ -1893,9 +1894,12 @@ export type LimitHandoffResult = {
  * original provider actually refused a request. `standby` only loads the
  * context and waits — used when the user accepts a `HandoffSuggestion` after
  * a turn that finished normally, where there is nothing left unfinished to
- * resume and "continuing" would have the fallback invent work.
+ * resume and "continuing" would have the fallback invent work. `manual` is
+ * the same as `continue` (pick the work back up) but for a switch the user
+ * asked for on their own, any time, for any reason — not triggered by any
+ * usage/rate limit, so its opening message never mentions one.
  */
-export type LimitHandoffMode = 'continue' | 'standby';
+export type LimitHandoffMode = 'continue' | 'standby' | 'manual';
 
 /**
  * An offer to move a session before its provider runs out: sent as a

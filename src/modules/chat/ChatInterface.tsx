@@ -36,7 +36,7 @@ import ChatMessagesPane from '@/modules/chat/transcript/ChatMessagesPane';
 import ChatComposer from '@/modules/chat/composer/ChatComposer';
 import BackendToolsBar from '@/modules/chat/composer/BackendToolsBar';
 import CommandResultModal from '@/modules/chat/modals/CommandResultModal';
-import { HandoffSuggestionBanner } from '@/modules/handoff';
+import { HandoffSuggestionBanner, SwitchBackendPanel } from '@/modules/handoff';
 import { MixSendPanel } from '@/modules/mix';
 import { OrchestratorPlanPanel } from '@/modules/orchestrator';
 import { TaskRouterPanel } from '@/modules/task-router';
@@ -361,6 +361,19 @@ function ChatInterface({
   const isOrchestratorSession = Boolean(viewedSessionId)
     && readUserPreference('providerRoles', {} as Partial<Record<LLMProvider, string>>)[provider] === 'orchestrator';
   const backendTools = [
+    ...(viewedSessionId
+      ? [{
+        id: 'switch-backend',
+        label: t('backendTools.switchBackend.label'),
+        content: (
+          <SwitchBackendPanel
+            sessionId={viewedSessionId}
+            currentProvider={provider}
+            onOpenSession={(toSessionId) => onNavigateToSession?.(toSessionId)}
+          />
+        ),
+      }]
+      : []),
     ...(selectedProject?.projectId
       ? [{
         id: 'mix',

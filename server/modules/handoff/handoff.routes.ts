@@ -23,9 +23,13 @@ const KNOWN_REASONS: ProviderLimitReason[] = [
   'five_hour', 'seven_day', 'seven_day_opus', 'seven_day_sonnet', 'rate_limit', 'unknown_limit',
 ];
 
-function readReason(value: unknown): ProviderLimitReason {
+/** A `manual` switch has no limit reason; every other mode needs a known one. */
+function readReason(value: unknown, mode: LimitHandoffMode): ProviderLimitReason | undefined {
   if (typeof value === 'string' && (KNOWN_REASONS as string[]).includes(value)) {
     return value as ProviderLimitReason;
+  }
+  if (mode === 'manual' && value === undefined) {
+    return undefined;
   }
   throw new AppError(`reason must be one of: ${KNOWN_REASONS.join(', ')}.`, {
     code: 'INVALID_REQUEST_BODY',
@@ -47,10 +51,10 @@ function readFallbackOrder(value: unknown): LLMProvider[] | undefined {
 }
 
 function readMode(value: unknown): LimitHandoffMode {
-  if (value === undefined || value === 'continue' || value === 'standby') {
+  if (value === undefined || value === 'continue' || value === 'standby' || value === 'manual') {
     return value ?? 'continue';
   }
-  throw new AppError('mode must be "continue" or "standby".', {
+  throw new AppError('mode must be "continue", "standby" or "manual".', {
     code: 'INVALID_REQUEST_BODY',
     statusCode: 400,
   });
@@ -76,13 +80,20 @@ router.post(
     }
 
     const userId = readUserId(req);
+    const mode = readMode(body.mode);
+    const fallbackOrder = readFallbackOrder(body.fallbackOrder);
+    // A manual switch names the one backend the user picked; silently
+    // falling back to the saved default order could land on a different one.
+    if (mode === 'manual' && (!fallbackOrder || fallbackOrder.length === 0)) {
+      throw new AppError('fallbackOrder is required for a manual switch.', { code: 'INVALID_REQUEST_BODY', statusCode: 400 });
+    }
     const result = await handoffSessionOnLimit(
       {
         fromSessionId: body.sessionId,
         userId,
-        reason: readReason(body.reason),
-        mode: readMode(body.mode),
-        fallbackOrder: readFallbackOrder(body.fallbackOrder) ?? readStoredFallbackOrder(userId),
+        reason: readReason(body.reason, mode),
+        mode,
+        fallbackOrder: fallbackOrder ?? readStoredFallbackOrder(userId),
       },
       providerRuntimeService,
     );

@@ -188,6 +188,25 @@ test('a standby handoff tells the fallback to wait instead of resuming work', as
   });
 });
 
+test('a manual switch picks up the work with no limit reason and does not mark the original provider limited', async () => {
+  await withHandoffDatabase(async ({ projectPath, runtime, turns }) => {
+    sessionsDb.createAppSession('from-session', 'openrouter', projectPath, 'Refactor');
+
+    const result = await handoffSessionOnLimit(
+      { fromSessionId: 'from-session', userId: 1, mode: 'manual', fallbackOrder: ['claude'] },
+      runtime,
+      async () => true,
+    );
+
+    assert.equal(result.mode, 'manual');
+    assert.equal(result.toProvider, 'claude');
+    assert.equal(result.reason, undefined);
+    assert.match(turns[0].command, /the user asked for this conversation to continue/);
+    assert.match(turns[0].command, /continue from where it leaves off/);
+    assert.equal(isProviderLimited('openrouter'), false);
+  });
+});
+
 test('two exhausted backends do not hand a conversation back and forth', async () => {
   await withHandoffDatabase(async ({ projectPath, runtime }) => {
     sessionsDb.createAppSession('first', 'openrouter', projectPath);
