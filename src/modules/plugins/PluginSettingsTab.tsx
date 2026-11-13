@@ -622,6 +622,8 @@ export default function PluginSettingsTab() {
         <ShieldAlert className="mt-px h-3 w-3 flex-shrink-0" />
         <span>
           {t('pluginSettings.securityWarning')}
+          {' '}
+          {t('pluginSettings.thirdPartyNote')}
         </span>
       </p>
 

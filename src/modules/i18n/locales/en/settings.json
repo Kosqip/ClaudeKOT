@@ -785,7 +785,8 @@
     "disable": "Disable",
     "installAriaLabel": "Plugin git repository URL",
     "tab": "tab",
-    "runningStatus": "running"
+    "runningStatus": "running",
+    "thirdPartyNote": "Every plugin listed below was made by third-party authors for the original CloudCLI project, not by ClaudeKOT: a plugin is someone else's code that gets access to your server and files."
   },
   "skillsPage": {
     "description": "Manage {{provider}} skills from local files, complete folders, and project-aware locations.",
