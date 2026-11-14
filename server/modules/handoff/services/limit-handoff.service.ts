@@ -4,12 +4,13 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { handoffLinksDb, sessionsDb, userPreferencesDb } from '@/modules/database/index.js';
-import { mapClaudeRateLimitType, providerAuthService, sessionsService } from '@/modules/providers/index.js';
+import { detectProviderLimit, mapClaudeRateLimitType, providerAuthService, sessionsService } from '@/modules/providers/index.js';
 import type { ProviderRuntimeGateway } from '@/modules/websocket/index.js';
 import { broadcastToConnectedClients, startDetachedChatTurn } from '@/modules/websocket/index.js';
 import { AppError, isTextOnlyProvider } from '@/shared/utils.js';
 import type {
   HandoffSuggestion,
+  ProviderFatalFailureCause,
   LimitHandoffMode,
   LimitHandoffResult,
   LLMProvider,
@@ -149,6 +150,41 @@ export function shouldHandoffForRateLimitStatus(
   }
 
   return { handoff: false };
+}
+
+/**
+ * Decides what a failed turn's error means for the relay ("fail fast",
+ * after Audatic07/duo):
+ * - `fail_fast` — the CLI is missing, the sign-in is missing/expired or the
+ *   model is unknown. No retry or other backend can fix that, so no relay is
+ *   started (it would only spend the fallback's limit on a doomed turn); the
+ *   chat shows the error with a localized explanation instead.
+ * - `handoff` — a subscription/rate limit: move the session to a fallback.
+ * - `none` — any other failure: left to the user, as before.
+ *
+ * `errorCode` is the provider's structured code when there is one (Claude's
+ * `SDKAssistantMessageError`); the message text is used only where the
+ * provider gives nothing else. Used by `server/index.ts` for every failed
+ * chat turn, and by this module's tests.
+ */
+export function decideHandoffForRunFailure(
+  provider: LLMProvider,
+  failure: { message: string; errorCode?: string },
+):
+  | { action: 'handoff'; reason: ProviderLimitReason }
+  | { action: 'fail_fast'; cause: ProviderFatalFailureCause }
+  | { action: 'none' } {
+  const detection = detectProviderLimit(provider, {
+    message: failure.message,
+    claudeSdkError: provider === 'claude' ? failure.errorCode : undefined,
+  });
+  if (detection.detected) {
+    return { action: 'handoff', reason: detection.reason };
+  }
+  if (detection.fatalCause) {
+    return { action: 'fail_fast', cause: detection.fatalCause };
+  }
+  return { action: 'none' };
 }
 
 /**

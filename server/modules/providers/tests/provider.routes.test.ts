@@ -596,3 +596,20 @@ test('the workflow agent route reads an agent\'s timeline and status from its ru
     assert.equal(missing.error.code, 'WORKFLOW_AGENT_NOT_FOUND');
   });
 });
+
+test('limits route lists Claude and Codex with "no data" until they report, then their last reading', async () => {
+  const { providerLimitsStore } = await import('@/modules/providers/services/provider-limits.store.js');
+  await withProviderServer(async (baseUrl) => {
+    const empty = await fetch(`${baseUrl}/api/providers/limits`);
+    const emptyPayload = await empty.json() as { success: boolean; data: { providers: Array<{ provider: string; fiveHour: unknown; sevenDay: unknown }> } };
+    assert.equal(empty.status, 200);
+    assert.deepEqual(emptyPayload.data.providers.map((entry) => entry.provider), ['claude', 'codex']);
+
+    providerLimitsStore.record('codex', { status: 'allowed', rateLimitType: 'five_hour', utilization: 0.25, resetsAt: '2026-11-14T15:00:00.000Z' });
+    const filled = await fetch(`${baseUrl}/api/providers/limits`);
+    const filledPayload = await filled.json() as { data: { providers: Array<{ provider: string; fiveHour: { usedPercent: number; resetsAt: string } | null }> } };
+    const codex = filledPayload.data.providers.find((entry) => entry.provider === 'codex');
+    assert.equal(codex?.fiveHour?.usedPercent, 25);
+    assert.equal(codex?.fiveHour?.resetsAt, '2026-11-14T15:00:00.000Z');
+  });
+});

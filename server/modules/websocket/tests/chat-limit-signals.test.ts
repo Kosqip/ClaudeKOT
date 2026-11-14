@@ -145,3 +145,29 @@ test('a runtime\'s terminal complete message reaches onRunCompleted', async () =
     assert.deepEqual(completed, [{ provider: 'codex', sessionId, userId: 1 }]);
   });
 });
+
+test('an error no backend can fix is labelled for the UI, reaches onRunFailed with its code and ends the turn as failed', async () => {
+  await withSession('claude', async (sessionId) => {
+    const failures: unknown[] = [];
+    const sent: Array<Record<string, unknown>> = [];
+
+    const result = await runDetachedChatTurn(
+      { sessionId, userId: 1, content: 'hello' },
+      {
+        runtime: {
+          hasRuntime: () => true,
+          run: async (_provider: string, _command: string, _options: unknown, writer: Writer) => {
+            const message = { kind: 'error', content: 'Invalid API key · Please run /login', providerErrorCode: 'authentication_failed', sessionId, provider: 'claude' };
+            writer.send(message);
+            sent.push(message);
+          },
+        } as never,
+        onRunFailed: (failure) => failures.push(failure),
+      },
+    );
+
+    assert.deepEqual(failures, [{ provider: 'claude', sessionId, userId: 1, message: 'Invalid API key · Please run /login', errorCode: 'authentication_failed' }]);
+    assert.equal(sent[0].failureCause, 'auth_required');
+    assert.deepEqual(result, { started: true, error: 'Invalid API key · Please run /login', failureCause: 'auth_required' });
+  });
+});

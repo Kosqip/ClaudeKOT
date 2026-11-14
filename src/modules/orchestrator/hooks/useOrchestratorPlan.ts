@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { api } from '@/shared/api';
-import type { LLMProvider } from '@/shared/types';
+import type { LLMProvider, ProviderFatalFailureCause } from '@/shared/types';
 
 /** One subtask of an orchestrated task as the server reports it (mirrors the server's `OrchestratorSubtaskResult`). */
 export type OrchestratorSubtaskResult = {
@@ -14,6 +14,8 @@ export type OrchestratorSubtaskResult = {
   provider?: LLMProvider;
   sessionId?: string;
   error?: string;
+  /** Set when the subtask failed fast: its backend cannot work at all, so it was not passed along the role chain. */
+  failureCause?: ProviderFatalFailureCause;
   /** Backends that began the subtask and ran out of usage before `provider` took it over. */
   movedFrom?: LLMProvider[];
   /** Set only in a pair run: the writer's or the reviewer's turn. */

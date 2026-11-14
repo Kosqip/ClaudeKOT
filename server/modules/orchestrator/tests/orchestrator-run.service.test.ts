@@ -553,3 +553,28 @@ test('pair: an unreadable verdict is asked for once more in the reviewer\'s own 
     return isReview(turn) ? 'Looks good to me!' : 'Built.\nWRITER_STATUS: done';
   });
 });
+
+test('a subtask whose backend cannot work at all fails with the reason instead of going down the role chain', async () => {
+  await withOrchestrator([json(ONE_BUILD), CLOSED], async ({ dependencies, subtaskTurns }) => {
+    const failingDependencies: OrchestratorRunDependencies = {
+      ...dependencies,
+      runTurn: async (input) => {
+        const outcome = await dependencies.runTurn(input);
+        return sessionsDb.getSessionById(input.sessionId)?.provider === 'codex'
+          ? { started: true, error: 'Your refresh token has expired. Please log in again.', failureCause: 'auth_required' }
+          : outcome;
+      },
+    };
+    const { run, finished } = start(failingDependencies);
+    await finished;
+
+    const final = getOrchestratorRun(run.id)!;
+    assert.equal(final.phase, 'done');
+    // Claude could stand in for the "hands" role, but is not asked to.
+    assert.deepEqual(subtaskTurns().map((turn) => turn.provider), ['codex']);
+    assert.equal(final.subtasks[0].status, 'failed');
+    assert.equal(final.subtasks[0].failureCause, 'auth_required');
+    assert.equal(final.subtasks[0].movedFrom, undefined);
+    assert.match(final.subtasks[0].error ?? '', /codex cannot work: it is not signed in.*refresh token has expired/);
+  });
+});

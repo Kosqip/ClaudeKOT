@@ -7,6 +7,7 @@ import { providerCliService } from '@/modules/providers/services/provider-cli.se
 import { providerMcpService } from '@/modules/providers/services/mcp.service.js';
 import { providerModelsService } from '@/modules/providers/services/provider-models.service.js';
 import { providerTokenUsageService } from '@/modules/providers/services/provider-token-usage.service.js';
+import { providerLimitsStore } from '@/modules/providers/services/provider-limits.store.js';
 import { providerSkillsService } from '@/modules/providers/services/skills.service.js';
 import { sessionConversationsSearchService } from '@/modules/providers/services/session-conversations-search.service.js';
 import { sideQuestionsService } from '@/modules/providers/services/side-questions.service.js';
@@ -869,6 +870,18 @@ router.post(
       scope: payload.scope === 'user' ? 'user' : 'project',
     });
     res.status(201).json(createApiSuccessResponse({ results }));
+  }),
+);
+
+/**
+ * The last known five-hour and weekly subscription windows of each provider
+ * that reports them (Claude, Codex). A window never reported is null — the
+ * settings screen shows "no data" for it rather than a guess.
+ */
+router.get(
+  '/limits',
+  asyncHandler(async (_req: Request, res: Response) => {
+    res.json(createApiSuccessResponse({ providers: providerLimitsStore.list() }));
   }),
 );
 

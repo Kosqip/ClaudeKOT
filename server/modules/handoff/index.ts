@@ -18,6 +18,11 @@ export {
   shouldHandoffForRateLimitStatus,
 } from '@/modules/handoff/services/limit-handoff.service.js';
 
+// decideHandoffForRunFailure: used by server/index.ts to tell a limit
+// (relay to a fallback) from a failure no backend can fix (fail fast: no
+// relay, the error is shown) when a chat turn fails.
+export { decideHandoffForRunFailure } from '@/modules/handoff/services/limit-handoff.service.js';
+
 // suggestHandoff: used by server/index.ts to offer a switch (without starting
 // one) when a turn ends above the user's threshold. readStoredFallbackOrder:
 // the user's own fallback order, applied by server/index.ts on every

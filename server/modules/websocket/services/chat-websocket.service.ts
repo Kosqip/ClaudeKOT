@@ -5,6 +5,7 @@ import type { WebSocket } from 'ws';
 
 import { sessionsDb } from '@/modules/database/index.js';
 import {
+  detectProviderLimit,
   MAX_CONCURRENT_SIDE_QUESTIONS_PER_SESSION,
   providerCapabilitiesService,
   providerModelsService,
@@ -23,6 +24,7 @@ import type {
   AnyRecord,
   AuthenticatedWebSocketRequest,
   LLMProvider,
+  ProviderFatalFailureCause,
   ProviderPermissionDecision,
   ProviderRuntimeWriter,
   RateLimitStatus,
@@ -108,8 +110,11 @@ type ChatWebSocketDependencies = {
    * `runDetachedChatTurn`, and a direct import either way would cycle).
    * Errors from the callback itself are swallowed: a handoff failing must
    * never turn into a second failure for the run that already failed.
+   * `errorCode` is the provider's structured error code when the runtime
+   * attached one (`providerErrorCode`, today Claude's
+   * `SDKAssistantMessageError`), so the decision need not read the wording.
    */
-  onRunFailed?(input: { provider: LLMProvider; sessionId: string; userId: string | number | null; message: string }): void;
+  onRunFailed?(input: { provider: LLMProvider; sessionId: string; userId: string | number | null; message: string; errorCode?: string }): void;
   /**
    * Called for every `rate_limit_status` message a provider's runtime emits
    * on its writer — Claude's SDK pushes one whenever claude.ai's utilization
@@ -127,6 +132,13 @@ type ChatWebSocketDependencies = {
    */
   onRunCompleted?(input: { provider: LLMProvider; sessionId: string; userId: string | number | null }): void;
 };
+
+/**
+ * How one turn the app ran itself ended: whether it started, its error text
+ * (a thrown failure, or the runtime's own error message when that error is
+ * one no backend can fix) and, for the latter, `failureCause`.
+ */
+type DetachedTurnOutcome = { started: boolean; error: string | null; failureCause?: ProviderFatalFailureCause };
 
 type ChatRunHooks = Pick<ChatWebSocketDependencies, 'onRunFailed' | 'onRateLimitStatus' | 'onRunCompleted'>;
 
@@ -295,7 +307,7 @@ async function dispatchRun(
   dependencies: ChatWebSocketDependencies,
   extraRuntimeOptions: AnyRecord = {},
   beforeRun?: (run: NonNullable<ReturnType<typeof chatRunRegistry.startRun>>) => void | Promise<void>,
-): Promise<{ started: boolean; error: string | null }> {
+): Promise<DetachedTurnOutcome> {
   const provider = session.provider as LLMProvider;
 
   const run = chatRunRegistry.startRun({
@@ -376,7 +388,13 @@ async function dispatchRun(
           status: message.rateLimitStatus as RateLimitStatus,
         });
       } else if (message?.kind === 'error' && typeof message.content === 'string' && message.content) {
-        (dependencies.onRunFailed ?? defaultRunHooks.onRunFailed)?.({ provider, sessionId, userId, message: message.content });
+        (dependencies.onRunFailed ?? defaultRunHooks.onRunFailed)?.({
+          provider,
+          sessionId,
+          userId,
+          message: message.content,
+          ...(typeof message.providerErrorCode === 'string' ? { errorCode: message.providerErrorCode } : {}),
+        });
       } else if (message?.kind === 'complete') {
         (dependencies.onRunCompleted ?? defaultRunHooks.onRunCompleted)?.({ provider, sessionId, userId });
       }
@@ -384,6 +402,11 @@ async function dispatchRun(
       console.error('[Chat] limit-signal hook threw', { sessionId, error: hookError });
     }
   };
+
+  // The first error of this run that no retry or other backend can fix;
+  // reported in the outcome so a caller that runs turns itself (the
+  // orchestrator) can fail fast instead of passing the work along.
+  let fatalFailure: { cause: ProviderFatalFailureCause; message: string } | null = null;
 
   // A Proxy rather than a hand-written wrapper object: runtimes reach for
   // more of the writer than `ProviderRuntimeWriter` names (`updateWebSocket`,
@@ -393,6 +416,10 @@ async function dispatchRun(
     get(target, property) {
       if (property === 'send') {
         return (data: unknown) => {
+          const cause = labelFatalFailure(provider, data);
+          if (cause && !fatalFailure) {
+            fatalFailure = { cause, message: (data as AnyRecord).content as string };
+          }
           target.send(data);
           inspectOutgoingMessage(data);
         };
@@ -412,6 +439,10 @@ async function dispatchRun(
     await dependencies.runtime.run(provider, command, runtimeOptions, writerWithLimitSignal);
   } catch (error) {
     failure = error instanceof Error ? error.message : String(error);
+    const thrownDetection = detectProviderLimit(provider, { message: failure });
+    if (!fatalFailure && !thrownDetection.detected && thrownDetection.fatalCause) {
+      fatalFailure = { cause: thrownDetection.fatalCause, message: failure };
+    }
     console.error(`[Chat] Provider runtime "${provider}" failed`, { sessionId, error: failure });
     try {
       (dependencies.onRunFailed ?? defaultRunHooks.onRunFailed)?.({ provider, sessionId, userId, message: failure });
@@ -427,7 +458,35 @@ async function dispatchRun(
     chatRunRegistry.completeRunIfCurrent(run, { exitCode: 1 });
   }
 
-  return { started: true, error: failure };
+  // TypeScript cannot see the Proxy's closure assigning `fatalFailure`.
+  const fatal = fatalFailure as { cause: ProviderFatalFailureCause; message: string } | null;
+  return fatal
+    ? { started: true, error: failure ?? fatal.message, failureCause: fatal.cause }
+    : { started: true, error: failure };
+}
+
+/**
+ * Marks an outgoing `error` message with `failureCause` when it is a failure
+ * no retry or backend switch can fix (CLI missing, sign-in missing/expired,
+ * unknown model), so every client watching the run can explain it in the
+ * user's language. A runtime that already set the cause keeps it. Returns
+ * the cause (null for any other message) so the run can report it.
+ */
+function labelFatalFailure(provider: LLMProvider, data: unknown): ProviderFatalFailureCause | null {
+  const message = data as AnyRecord | null;
+  if (message?.kind !== 'error' || typeof message.content !== 'string') {
+    return null;
+  }
+  if (!message.failureCause) {
+    const detection = detectProviderLimit(provider, {
+      message: message.content,
+      claudeSdkError: typeof message.providerErrorCode === 'string' ? message.providerErrorCode : undefined,
+    });
+    if (!detection.detected && detection.fatalCause) {
+      message.failureCause = detection.fatalCause;
+    }
+  }
+  return (message.failureCause as ProviderFatalFailureCause | undefined) ?? null;
 }
 
 /**
@@ -977,7 +1036,7 @@ export async function runDetachedChatTurn(
     interruptActiveRun?: boolean;
   },
   dependencies: ChatWebSocketDependencies,
-): Promise<{ started: boolean; error: string | null }> {
+): Promise<DetachedTurnOutcome> {
   const session = sessionsDb.getSessionById(input.sessionId);
   if (!session) {
     return { started: false, error: 'The session no longer exists.' };
@@ -1032,7 +1091,7 @@ export async function startDetachedChatTurn(
 ): Promise<{
   started: boolean;
   error: string | null;
-  completion: Promise<{ started: boolean; error: string | null }>;
+  completion: Promise<DetachedTurnOutcome>;
 }> {
   const refuse = (error: string) => ({
     started: false,

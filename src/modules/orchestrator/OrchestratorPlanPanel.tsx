@@ -188,6 +188,13 @@ export function OrchestratorPlanPanel({
                             {` (${t('backendTools.orchestrator.movedFrom', { providers: subtask.movedFrom.map((provider) => LLM_PROVIDER_NAMES[provider]).join(', ') })})`}
                           </span>
                         ) : null}
+                        {subtask.failureCause && subtask.provider ? (
+                          <span className="block text-destructive">
+                            {t(`providerFailure.${subtask.failureCause}`, { provider: LLM_PROVIDER_NAMES[subtask.provider] })}
+                            {' '}
+                            {t('backendTools.orchestrator.notPassedOn')}
+                          </span>
+                        ) : null}
                         {subtask.error ? <span className="text-muted-foreground">{` (${subtask.error})`}</span> : null}
                       </span>
                     </span>

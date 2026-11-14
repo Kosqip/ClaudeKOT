@@ -534,6 +534,19 @@ export type NormalizedMessage = {
   /** Present only on `kind: 'rate_limit_status'`; see `RateLimitStatus`. */
   rateLimitStatus?: RateLimitStatus;
   /**
+   * Present only on `kind: 'error'`, and only when the error is one a retry
+   * or a backend switch cannot fix; see `ProviderFatalFailureCause`.
+   */
+  failureCause?: ProviderFatalFailureCause;
+  /**
+   * Present only on `kind: 'error'` emitted by the Claude runtime for an
+   * assistant message that carried the SDK's structured
+   * `SDKAssistantMessageError` code (e.g. `authentication_failed`,
+   * `model_not_found`, `rate_limit`); read by the chat gateway so limit and
+   * fail-fast detection use the code instead of the message wording.
+   */
+  providerErrorCode?: string;
+  /**
    * Timeline of everything a subagent did, attached to the `tool_use` that
    * spawned it. Present for Claude `Agent`/`Task` calls and Codex
    * `spawn_agent` calls; absent for every other tool.
@@ -1867,7 +1880,24 @@ export type ProviderLimitReason =
  */
 export type ProviderLimitDetectionResult =
   | { detected: true; reason: ProviderLimitReason; resetsAt?: string }
-  | { detected: false };
+  | { detected: false; fatalCause?: ProviderFatalFailureCause };
+
+/**
+ * A failure that neither a retry nor a move to another backend can fix
+ * ("fail fast", after Audatic07/duo): the provider's CLI is not installed,
+ * its sign-in is missing or expired, or the requested model does not exist.
+ * Reported by `detectProviderLimit` as `fatalCause` on a non-limit result —
+ * checked before any limit match, so an error that happens to mention a
+ * limit is still not handed off. Consumers:
+ * - the handoff decision in `server/modules/handoff/` refuses to start a
+ *   relay for it (that would only spend another backend's limit);
+ * - the orchestrator marks the subtask failed with this cause instead of
+ *   passing it along the role chain;
+ * - the chat gateway attaches it to the `error` message as `failureCause`
+ *   so the UI can show a localized explanation (`chat.json`,
+ *   `providerFailure.*`, mirrored by hand in `src/shared/types.ts`).
+ */
+export type ProviderFatalFailureCause = 'cli_missing' | 'auth_required' | 'unknown_model';
 
 // ---------------------------
 //----------------- LIMIT HANDOFF TYPES ------------
@@ -1938,6 +1968,38 @@ export type RateLimitStatus = {
   resetsAt?: string;
 };
 
+/**
+ * The last known state of one subscription window (five-hour or weekly) of
+ * one provider, as kept by the provider limits store
+ * (`server/modules/providers/services/provider-limits.store.ts`) and served
+ * by `GET /api/providers/limits`. Only what the provider itself reported is
+ * stored: `usedPercent`/`resetsAt` are null when the reading lacked them,
+ * never estimated. `observedAt` is when the server received the reading,
+ * so the UI can show how stale it is. Mirrored by hand in
+ * `src/shared/types.ts`.
+ */
+export type ProviderLimitWindowSnapshot = {
+  /** Share of the window used, 0–100, or null when the provider gave none. */
+  usedPercent: number | null;
+  /** ISO time the window resets, or null when the provider gave none. */
+  resetsAt: string | null;
+  /** The provider's own status for the window at the time of the reading. */
+  status: RateLimitStatus['status'];
+  /** ISO time the server received this reading. */
+  observedAt: string;
+};
+
+/**
+ * Last known subscription windows of one provider. A window that the
+ * provider has not reported since the store was created is null — the UI
+ * renders that as "no data" rather than a zero.
+ */
+export type ProviderLimitsSnapshot = {
+  provider: LLMProvider;
+  fiveHour: ProviderLimitWindowSnapshot | null;
+  sevenDay: ProviderLimitWindowSnapshot | null;
+};
+
 // ---------------------------
 //----------------- ORCHESTRATOR TYPES ------------
 /**
@@ -1992,6 +2054,12 @@ export type OrchestratorSubtaskResult = {
   provider?: LLMProvider;
   sessionId?: string;
   error?: string;
+  /**
+   * Set on a `failed` subtask whose backend hit a failure no other backend
+   * or retry can fix (CLI missing, sign-in, unknown model): the run did not
+   * pass it along the role chain. See `ProviderFatalFailureCause`.
+   */
+  failureCause?: ProviderFatalFailureCause;
   movedFrom?: LLMProvider[];
   /** Set only in a pair run: whether this turn was the writer's or the reviewer's. */
   pairPart?: 'writer' | 'reviewer';

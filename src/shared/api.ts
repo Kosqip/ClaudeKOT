@@ -462,6 +462,10 @@ export const api = {
       post(`/api/providers/${encodeURIComponent(provider)}/cli/update`),
     claudeSettingsPermissions: () => get('/api/providers/claude/settings-permissions'),
 
+    // Last known 5-hour and weekly subscription windows of Claude and Codex.
+    // Used by the handoff module's ProviderLimitsPanel (Settings → Agents).
+    limits: () => get('/api/providers/limits'),
+
     // Custom API's three service keys (OpenRouter/Anthropic/OpenAI), set from
     // Settings instead of the server's .env file. Used by AccountContent.
     openRouterKeys: () => get('/api/providers/openrouter/keys'),

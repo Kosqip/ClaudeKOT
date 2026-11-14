@@ -9,6 +9,7 @@ import Database from 'better-sqlite3';
 import {
   createProviderTokenUsageService,
   findCodexRateLimitStatus,
+  findCodexRateLimitWindows,
   summarizeClaudeTokenUsage,
 } from '@/modules/providers/services/provider-token-usage.service.js';
 import { AppError } from '@/shared/utils.js';
@@ -423,4 +424,20 @@ test('getCodexRateLimitStatus reads the session\'s rollout and never throws', as
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
+});
+
+test('findCodexRateLimitWindows returns both of Codex\'s windows from the newest reading, named by their length', () => {
+  const windows = findCodexRateLimitWindows([
+    codexTokenCount({ primary: { used_percent: 10, window_minutes: 300 } }),
+    codexTokenCount({
+      primary: { used_percent: 42, window_minutes: 300, resets_at: 1_800_000_000 },
+      secondary: { used_percent: 12, window_minutes: 10080, resets_at: 1_800_100_000 },
+    }),
+  ].join('\n'));
+
+  assert.deepEqual(windows, [
+    { status: 'allowed', rateLimitType: 'five_hour', utilization: 0.42, resetsAt: new Date(1_800_000_000 * 1000).toISOString() },
+    { status: 'allowed', rateLimitType: 'seven_day', utilization: 0.12, resetsAt: new Date(1_800_100_000 * 1000).toISOString() },
+  ]);
+  assert.deepEqual(findCodexRateLimitWindows(codexTokenCount(null)), []);
 });

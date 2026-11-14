@@ -39,6 +39,7 @@ import {
   notifyUserIfEnabled
 } from '@/modules/notifications/index.js';
 import { sessionHistoryCache } from '@/modules/providers/services/session-history-cache.service.js';
+import { detectProviderLimit } from '@/modules/providers/services/provider-limit-detection.service.js';
 import {
   getReportedClaudeContextWindow,
   rememberClaudeContextWindow
@@ -1713,6 +1714,31 @@ async function queryClaudeSDK(
           continue;
         }
         ws.send(msg);
+      }
+
+      // The SDK marks a failed request's assistant message with a structured
+      // `error` code (`SDKAssistantMessageError`). For the codes no retry or
+      // backend switch can fix (sign-in, unknown model) an `error` row is
+      // added carrying that code, so the chat gateway's fail-fast check and
+      // the UI read the code itself rather than the reply's wording.
+      if (message.type === 'assistant' && !message.parent_tool_use_id && typeof message.error === 'string') {
+        const detection = detectProviderLimit('claude', { claudeSdkError: message.error });
+        if (!detection.detected && detection.fatalCause) {
+          const replyText = Array.isArray(message.message?.content)
+            ? (message.message.content as AnyRecord[])
+              .map((part) => (part?.type === 'text' && typeof part.text === 'string' ? part.text : ''))
+              .join('')
+              .trim()
+            : '';
+          ws.send(createNormalizedMessage({
+            kind: 'error',
+            content: replyText || `Claude request failed: ${message.error}`,
+            providerErrorCode: message.error,
+            failureCause: detection.fatalCause,
+            sessionId: sid,
+            provider: 'claude',
+          }));
+        }
       }
 
       if (

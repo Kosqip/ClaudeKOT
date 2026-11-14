@@ -540,6 +540,23 @@
       }
     },
     "error": "Error: {{error}}",
+    "providerLimits": {
+      "title": "Subscription limits",
+      "description": "The last usage each subscription reported: the 5-hour and the weekly window. Claude reports it live while it works; Codex after each of its turns. Nothing is estimated — a window that has not been reported shows \"no data\".",
+      "fiveHour": "5 hours",
+      "sevenDay": "Week",
+      "noData": "no data",
+      "used": "{{percent}}% used",
+      "usedUnknown": "usage not reported",
+      "resetsAt": "resets {{time}}",
+      "observedAt": "reported {{time}}",
+      "status": {
+        "allowed_warning": "close to the limit",
+        "rejected": "limit reached"
+      },
+      "refresh": "Refresh",
+      "loadFailed": "Could not load the limits."
+    },
     "handoffThreshold": {
       "title": "Automatic backend handoff",
       "description": "When a backend’s own plan usage (Claude, Codex) reaches this level, you are offered a one-click move to a fallback backend once the current reply ends. If a backend refuses a request, the conversation always moves on its own.",

@@ -1,3 +1,7 @@
+// ProviderLimitsPanel: the "Subscription limits" screen (last 5-hour and
+// weekly usage of Claude and Codex), rendered once by AgentsSettingsTab.
+export { default as ProviderLimitsPanel } from '@/modules/handoff/ProviderLimitsPanel.js';
+
 // HandoffThresholdSetting: the global (not per-provider) control for when
 // automatic limit handoff fires, rendered once by AgentsSettingsTab.
 export { default as HandoffThresholdSetting } from '@/modules/handoff/HandoffThresholdSetting.js';

@@ -29,7 +29,8 @@ test('claude: the rate_limit assistant-message error literal is detected without
 
 test('claude: an unrelated assistant-message error is not a limit hit', () => {
   assert.deepEqual(detectProviderLimit('claude', { claudeSdkError: 'server_error' }), { detected: false });
-  assert.deepEqual(detectProviderLimit('claude', { claudeSdkError: 'authentication_failed' }), { detected: false });
+  // Not a limit either — but fatal, so reported with its cause (see the fail-fast tests below).
+  assert.deepEqual(detectProviderLimit('claude', { claudeSdkError: 'authentication_failed' }), { detected: false, fatalCause: 'auth_required' });
   assert.deepEqual(detectProviderLimit('claude', {}), { detected: false });
 });
 
@@ -60,7 +61,7 @@ test('openrouter: a 429 status embedded in the thrown error message is detected'
 
 test('openrouter: a non-429 status is not a limit hit', () => {
   assert.deepEqual(detectProviderLimit('openrouter', { message: 'OpenRouter request failed (500): internal error' }), { detected: false });
-  assert.deepEqual(detectProviderLimit('openrouter', { message: 'OpenRouter request failed (401): invalid key' }), { detected: false });
+  assert.deepEqual(detectProviderLimit('openrouter', { message: 'OpenRouter request failed (401): invalid key' }), { detected: false, fatalCause: 'auth_required' });
 });
 
 test('cursor and opencode have no known limit signal and always report not detected', () => {
@@ -100,4 +101,68 @@ test('openrouter: a 402 (balance spent) is treated as a limit', () => {
     detectProviderLimit('openrouter', { message: 'openrouter request failed (402): Insufficient credits' }),
     { detected: true, reason: 'unknown_limit' },
   );
+});
+
+// ---- Fail fast: failures no retry or other backend can fix ----
+
+test('claude: structured sign-in and unknown-model errors are fatal, not limits', () => {
+  assert.deepEqual(detectProviderLimit('claude', { claudeSdkError: 'authentication_failed' }), { detected: false, fatalCause: 'auth_required' });
+  assert.deepEqual(detectProviderLimit('claude', { claudeSdkError: 'oauth_org_not_allowed' }), { detected: false, fatalCause: 'auth_required' });
+  assert.deepEqual(detectProviderLimit('claude', { claudeSdkError: 'model_not_found' }), { detected: false, fatalCause: 'unknown_model' });
+});
+
+test('claude: transient or account errors are neither a limit nor fatal', () => {
+  for (const code of ['overloaded', 'server_error', 'billing_error', 'unknown']) {
+    assert.deepEqual(detectProviderLimit('claude', { claudeSdkError: code }), { detected: false });
+  }
+});
+
+test('claude: the sign-in wording alone is not read when the structured code is absent', () => {
+  assert.deepEqual(detectProviderLimit('claude', { message: 'Invalid API key · Please run /login' }), { detected: false });
+});
+
+test('a missing CLI binary is fatal for every provider', () => {
+  assert.deepEqual(
+    detectProviderLimit('claude', { message: 'Claude Code is not installed. Please install it first: https://docs.anthropic.com/en/docs/claude-code' }),
+    { detected: false, fatalCause: 'cli_missing' },
+  );
+  assert.deepEqual(
+    detectProviderLimit('claude', { message: 'Claude Code executable not found at /usr/bin/claude. Is options.pathToClaudeCodeExecutable set?' }),
+    { detected: false, fatalCause: 'cli_missing' },
+  );
+  assert.deepEqual(detectProviderLimit('codex', { message: 'spawn codex ENOENT' }), { detected: false, fatalCause: 'cli_missing' });
+  assert.deepEqual(detectProviderLimit('codex', { message: 'Codex CLI is not installed. Install it first: npm install -g @openai/codex' }), { detected: false, fatalCause: 'cli_missing' });
+  assert.deepEqual(detectProviderLimit('opencode', { message: 'OpenCode CLI is not installed. Install it from https://opencode.ai/docs/' }), { detected: false, fatalCause: 'cli_missing' });
+});
+
+test('codex: an expired or missing sign-in is fatal even when the text also mentions a limit', () => {
+  assert.deepEqual(
+    detectProviderLimit('codex', { message: 'Your refresh token has expired. Please log in again.' }),
+    { detected: false, fatalCause: 'auth_required' },
+  );
+  assert.deepEqual(
+    detectProviderLimit('codex', { message: 'unexpected status 401 Unauthorized (rate limit headers missing)' }),
+    { detected: false, fatalCause: 'auth_required' },
+  );
+});
+
+test('codex: an unknown model is fatal', () => {
+  assert.deepEqual(
+    detectProviderLimit('codex', { message: 'The model `gpt-9` does not exist or you do not have access to it.' }),
+    { detected: false, fatalCause: 'unknown_model' },
+  );
+});
+
+test('codex: a real usage limit is still a limit', () => {
+  assert.deepEqual(
+    detectProviderLimit('codex', { message: "You've hit your usage limit. Try again in 3 hours." }),
+    { detected: true, reason: 'unknown_limit' },
+  );
+});
+
+test('openrouter: a rejected key or an unknown model is fatal, a 429 is a limit', () => {
+  assert.deepEqual(detectProviderLimit('openrouter', { message: 'openrouter request failed (401): No auth credentials found' }), { detected: false, fatalCause: 'auth_required' });
+  assert.deepEqual(detectProviderLimit('openrouter', { message: 'OPENROUTER_API_KEY is not set on the server.' }), { detected: false, fatalCause: 'auth_required' });
+  assert.deepEqual(detectProviderLimit('openrouter', { message: 'openrouter request failed (400): foo/bar is not a valid model ID' }), { detected: false, fatalCause: 'unknown_model' });
+  assert.deepEqual(detectProviderLimit('openrouter', { message: 'openrouter request failed (429): slow down' }), { detected: true, reason: 'rate_limit' });
 });

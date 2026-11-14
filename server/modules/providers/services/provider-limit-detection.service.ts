@@ -1,5 +1,6 @@
 import type {
   LLMProvider,
+  ProviderFatalFailureCause,
   ProviderLimitDetectionResult,
 } from '@/shared/types.js';
 
@@ -55,12 +56,111 @@ const CODEX_RATE_LIMIT_TEXT_PATTERNS = [
 ];
 
 /**
+ * Claude's structured `SDKAssistantMessageError` codes
+ * (`@anthropic-ai/claude-agent-sdk/sdk.d.ts`) that no retry or backend
+ * switch can fix. `account_on_hold`, `billing_error` and
+ * `verification_required` are left out on purpose: they are account states
+ * the user may resolve outside the app, and moving the conversation to
+ * another backend is a reasonable answer to them.
+ */
+const CLAUDE_FATAL_SDK_ERRORS: Partial<Record<string, ProviderFatalFailureCause>> = {
+  authentication_failed: 'auth_required',
+  oauth_org_not_allowed: 'auth_required',
+  model_not_found: 'unknown_model',
+};
+
+/**
+ * Error texts that mean the provider's CLI binary is missing. Each one is
+ * written by this app's own runtimes (`<Name> CLI is not installed`, the
+ * Claude runtime's `Claude Code is not installed`), by the Claude Agent SDK
+ * (`Claude Code executable/native binary not found at …`) or by Node itself
+ * when the binary cannot be spawned (`spawn codex ENOENT`) — never by a
+ * model's reply, so a match is not a guess at free text from the provider.
+ */
+const CLI_MISSING_TEXT_PATTERNS = [
+  /\b(?:CLI|Claude Code) is not installed\b/i,
+  /Claude Code (?:executable|native binary) not found at\b/i,
+  /\bspawn \S+ ENOENT\b/,
+];
+
+/**
+ * Codex sign-in failures. The Codex SDK gives only a free-text message (see
+ * `CODEX_RATE_LIMIT_TEXT_PATTERNS`), so these are the phrasings `codex exec`
+ * uses when it has no usable login or its refresh token has expired —
+ * deliberately specific (a bare "401" or "token" also appears in ordinary
+ * output).
+ */
+const CODEX_AUTH_TEXT_PATTERNS = [
+  /\bnot logged in\b/i,
+  /\bplease (?:log|sign) in again\b/i,
+  /\brefresh token (?:has )?(?:expired|was already used|is invalid)\b/i,
+  /\btoken_expired\b/,
+  /\brefresh_token_(?:expired|reused|invalidated)\b/,
+  /\b401 Unauthorized\b/i,
+];
+
+/** Codex's wording for a model id the account cannot use or that does not exist. */
+const CODEX_UNKNOWN_MODEL_TEXT_PATTERNS = [
+  /\bmodel_not_found\b/,
+  /\bmodel [`'"]?[\w.:-]+[`'"]? does not exist\b/i,
+  /\bunsupported model\b/i,
+  /\bunknown model\b/i,
+];
+
+/**
+ * Finds a failure no retry or handoff can fix. Structured fields are read
+ * first (Claude's `SDKAssistantMessageError`, OpenRouter's HTTP status);
+ * text only where the provider gives nothing else (Codex) or where the text
+ * is this app's/SDK's own (a missing binary). Returns undefined when the
+ * failure may well be fixed by waiting or by another backend.
+ */
+function detectFatalFailure(
+  provider: LLMProvider,
+  signal: { claudeSdkError?: string; message?: string },
+): ProviderFatalFailureCause | undefined {
+  const message = signal.message ?? '';
+  if (message && CLI_MISSING_TEXT_PATTERNS.some((pattern) => pattern.test(message))) {
+    return 'cli_missing';
+  }
+
+  if (provider === 'claude') {
+    return signal.claudeSdkError ? CLAUDE_FATAL_SDK_ERRORS[signal.claudeSdkError] : undefined;
+  }
+
+  if (provider === 'codex') {
+    if (CODEX_AUTH_TEXT_PATTERNS.some((pattern) => pattern.test(message))) {
+      return 'auth_required';
+    }
+    if (CODEX_UNKNOWN_MODEL_TEXT_PATTERNS.some((pattern) => pattern.test(message))) {
+      return 'unknown_model';
+    }
+    return undefined;
+  }
+
+  if (provider === 'openrouter') {
+    // `<service> request failed (<status>): …` — see the limit branch below.
+    const status = message.match(/\b(?:openrouter|anthropic|openai) request failed \((\d+)\)/i)?.[1];
+    if (status === '401' || /\b[A-Z_]+_API_KEY is not set on the server\b/.test(message)) {
+      return 'auth_required';
+    }
+    if (status === '404' || (status === '400' && /\b(?:not a valid model|model_not_found|no endpoints found)\b/i.test(message))) {
+      return 'unknown_model';
+    }
+    return undefined;
+  }
+
+  return undefined;
+}
+
+/**
  * Detects whether one provider's raw runtime error/event represents a
  * subscription or API rate limit rather than an ordinary failure.
  *
  * Used by the handoff module (`server/modules/handoff/`) to decide whether a
- * failed turn should trigger an automatic switch to a fallback backend, and
- * by its tests. Each provider's detection logic documents the exact field or
+ * failed turn should trigger an automatic switch to a fallback backend, by
+ * the orchestrator to tell a limit (pass the subtask on) from a failure no
+ * backend can fix (`fatalCause`: mark it failed), by the chat gateway to
+ * label such an error for the UI, and by its tests. Each provider's detection logic documents the exact field or
  * pattern it reads and where that shape came from, so a provider SDK upgrade
  * that changes the shape is easy to track down — see the comments on each
  * branch below rather than guessing from behavior.
@@ -76,6 +176,15 @@ export function detectProviderLimit(
     message?: string;
   },
 ): ProviderLimitDetectionResult {
+  // Fail fast: a missing CLI, a missing/expired sign-in or an unknown model
+  // is reported as such even when the text also mentions a limit — moving
+  // the session would only spend another backend's limit on a turn that
+  // cannot succeed anywhere until the user fixes the setup.
+  const fatalCause = detectFatalFailure(provider, signal);
+  if (fatalCause) {
+    return { detected: false, fatalCause };
+  }
+
   if (provider === 'claude') {
     // A rejected rate-limit window is the authoritative signal: it names
     // exactly which window (five_hour/seven_day/...) blocked the request.

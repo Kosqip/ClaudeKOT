@@ -6,6 +6,7 @@ import type { ChatMessage, ClaudePermissionSuggestion, PermissionGrantResult, LL
 import { formatUsageLimitText, stripProposedPlanEnvelope } from '@/modules/chat/utils/chatFormatting';
 import { ToolRenderer, ToolErrorDisplay, SubagentPanel, WorkflowPanel, shouldHideToolResult } from '@/modules/chat/tools';
 import { LLMProviderLogo, Shimmer } from '@/shared/ui';
+import { LLM_PROVIDER_NAMES } from '@/shared/constants';
 import { Reasoning, ReasoningContent, ReasoningTrigger } from '@/modules/chat/transcript/Reasoning';
 import ChatMessageImages from '@/modules/chat/transcript/ChatMessageImages';
 import ChatMessageFiles from '@/modules/chat/transcript/ChatMessageFiles';
@@ -483,6 +484,16 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, s
                     </div>
                   );
                 })()}
+
+                {/* A failure no retry or other backend can fix: say so plainly,
+                    in the user's language, under the provider's own text. */}
+                {message.type === 'error' && message.failureCause && (
+                  <div className="mt-2 rounded-md border border-red-300/60 bg-red-50 px-3 py-2 text-xs text-red-800 dark:border-red-800/60 dark:bg-red-950/40 dark:text-red-200">
+                    {t(`providerFailure.${message.failureCause}`, { provider: LLM_PROVIDER_NAMES[provider as LLMProvider] ?? provider })}
+                    {' '}
+                    {t('providerFailure.noHandoff')}
+                  </div>
+                )}
               </div>
             )}
 

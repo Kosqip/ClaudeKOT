@@ -422,6 +422,8 @@ export type ChatMessage = {
   memoryCitations?: MemoryCitation[];
   /** Lifecycle the provider reported for this tool call, when it reports one; otherwise the status is inferred from whether a result has arrived. */
   toolStatus?: string;
+  /** Set on an error row the server classified as one no retry or other backend can fix; the row then explains it in the user's language. */
+  failureCause?: ProviderFatalFailureCause;
   /** Set when this row is the question or answer half of a side question pair, so it draws and behaves apart from the session's own transcript (no edit, fork or retry; never a grouping, last-message or fork anchor). The session id is carried here because `ChatMessage` otherwise has none of its own, and the dismiss control's DELETE needs it. */
   sideQuestion?: { sideQuestionId: string; sessionId: string; status: SideQuestionStatus };
   [key: string]: unknown;
@@ -583,6 +585,8 @@ export type NormalizedMessage = {
    */
   seq?: number;
 
+  /** On a `kind: 'error'` row: set when the server classified the error as one no retry or other backend can fix. */
+  failureCause?: ProviderFatalFailureCause;
   // kind-specific fields (flat for simplicity)
   role?: 'user' | 'assistant';
   content?: string;
@@ -1478,6 +1482,19 @@ export type ProviderAuthStatus = {
 
 /** The authentication state of every CLI provider at once, keyed by LLMProvider, so onboarding and settings can render each provider's connected, loading and error state from one object returned by useProviderAuthStatus. */
 export type ProviderAuthStatusMap = Record<LLMProvider, ProviderAuthStatus>;
+
+// ---------------------------
+//----------------- PROVIDER FAILURES ------------
+
+/**
+ * Why a provider failed in a way no retry or switch to another backend can
+ * fix: its CLI is not installed, its sign-in is missing or expired, or the
+ * requested model does not exist. Set by the server on a chat `error`
+ * message (`failureCause`) and on a failed orchestrator subtask; the UI shows
+ * the matching `providerFailure.*` explanation from `chat.json`. Mirrors the
+ * server's `ProviderFatalFailureCause` by hand.
+ */
+export type ProviderFatalFailureCause = 'cli_missing' | 'auth_required' | 'unknown_model';
 
 // ---------------------------
 

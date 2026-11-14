@@ -579,7 +579,8 @@
         "outcomeApproved": "The reviewer approved the finished work.",
         "outcomeRounds": "The rounds ran out with findings still open — see the last round."
       },
-      "pausedDecision": "The reviewer raised the same serious finding two rounds in a row. Your decision is needed: press \"Continue now\" for another round (the writer is told to fix it differently or explain why it stays), or \"Stop\"."
+      "pausedDecision": "The reviewer raised the same serious finding two rounds in a row. Your decision is needed: press \"Continue now\" for another round (the writer is told to fix it differently or explain why it stays), or \"Stop\".",
+      "notPassedOn": "It was not passed to another backend: fix this, then continue the task."
     },
     "switchBackend": {
       "label": "Switch backend",
@@ -589,5 +590,11 @@
       "switching": "Switching…",
       "failed": "The switch could not be started."
     }
+  },
+  "providerFailure": {
+    "cli_missing": "{{provider}} cannot run: its CLI is not installed on the server. Install it, then send the message again.",
+    "auth_required": "{{provider}} is not signed in, or its sign-in has expired. Sign in again in Settings → Agents → {{provider}} → Account.",
+    "unknown_model": "{{provider}} does not know the selected model, or the account has no access to it. Pick another model.",
+    "noHandoff": "Retrying or moving the conversation to another backend would not fix this, so it was not moved and no other backend's limit was spent."
   }
 }

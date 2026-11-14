@@ -7,6 +7,7 @@ import test from 'node:test';
 
 import { closeConnection, initializeDatabase, sessionsDb } from '@/modules/database/index.js';
 import {
+  decideHandoffForRunFailure,
   DEFAULT_FALLBACK_ORDER,
   handoffSessionOnLimit,
   isProviderLimited,
@@ -354,4 +355,46 @@ test('suggestHandoff offers nothing when no fallback is ready', async () => {
     );
     assert.equal(suggestion, null);
   });
+});
+
+// ---- Fail fast: no relay for a failure no backend can fix ----
+
+test('decideHandoffForRunFailure relays a limit to a fallback', () => {
+  assert.deepEqual(
+    decideHandoffForRunFailure('codex', { message: "You've hit your usage limit. Try again later." }),
+    { action: 'handoff', reason: 'unknown_limit' },
+  );
+  assert.deepEqual(
+    decideHandoffForRunFailure('claude', { message: 'API Error: Rate limited', errorCode: 'rate_limit' }),
+    { action: 'handoff', reason: 'rate_limit' },
+  );
+});
+
+test('decideHandoffForRunFailure does not start a relay for a missing CLI, a lapsed sign-in or an unknown model', () => {
+  assert.deepEqual(
+    decideHandoffForRunFailure('claude', { message: 'Invalid API key · Please run /login', errorCode: 'authentication_failed' }),
+    { action: 'fail_fast', cause: 'auth_required' },
+  );
+  assert.deepEqual(
+    decideHandoffForRunFailure('claude', { message: 'There is an issue with the selected model', errorCode: 'model_not_found' }),
+    { action: 'fail_fast', cause: 'unknown_model' },
+  );
+  assert.deepEqual(
+    decideHandoffForRunFailure('codex', { message: 'spawn codex ENOENT' }),
+    { action: 'fail_fast', cause: 'cli_missing' },
+  );
+  // The wording mentions a limit, but the sign-in is what failed: no relay.
+  assert.deepEqual(
+    decideHandoffForRunFailure('codex', { message: 'Not logged in — usage limit unknown' }),
+    { action: 'fail_fast', cause: 'auth_required' },
+  );
+});
+
+test('decideHandoffForRunFailure leaves any other failure alone', () => {
+  assert.deepEqual(decideHandoffForRunFailure('codex', { message: 'Command failed: npm test' }), { action: 'none' });
+  assert.deepEqual(decideHandoffForRunFailure('claude', { message: 'boom', errorCode: 'server_error' }), { action: 'none' });
+});
+
+test('a Claude error code is not applied to another provider', () => {
+  assert.deepEqual(decideHandoffForRunFailure('codex', { message: 'boom', errorCode: 'authentication_failed' }), { action: 'none' });
 });

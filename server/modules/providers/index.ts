@@ -41,10 +41,15 @@ export {
 
 // providerTokenUsageService: besides serving token usage to this module's own
 // routes, server/index.ts reads Codex's plan-limit reading through it when a
-// Codex turn ends (getCodexRateLimitStatus).
+// Codex turn ends (getCodexRateLimitStatus, getCodexRateLimitWindows).
 export { providerTokenUsageService } from '@/modules/providers/services/provider-token-usage.service.js';
 
 // listCustomApiKeyStatus: read by the diagnostics report to show which
 // Custom API services have a key set and where it came from (UI or .env),
 // without ever including the value.
 export { listCustomApiKeyStatus } from '@/modules/providers/list/openrouter/services/custom-api-key-store.service.js';
+
+// providerLimitsStore: server/index.ts records every plan-window reading
+// Claude and Codex report into it; this module's GET /api/providers/limits
+// serves it to Settings → Agents → Subscription limits.
+export { providerLimitsStore } from '@/modules/providers/services/provider-limits.store.js';

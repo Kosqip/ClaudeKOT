@@ -513,6 +513,8 @@ export function normalizedToChatMessages(messages: NormalizedMessage[]): ChatMes
           type: 'error',
           content: msg.content || 'Unknown error',
           timestamp: msg.timestamp,
+          // Lets the error row add a localized "why, and what to do" line.
+          failureCause: msg.failureCause,
           ...sharedMetadata,
         });
         break;

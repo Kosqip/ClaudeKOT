@@ -223,17 +223,19 @@ function findCodexTokenUsage(fileContent: string): TokenUsageResult | null {
 const CODEX_WARNING_PERCENT = 80;
 
 /**
- * Codex's own plan-limit reading from the newest `token_count` row in the
- * given rollout JSONL text, or null when it has none. Codex records
+ * Every plan-limit window in the newest `token_count` row of the given Codex
+ * rollout JSONL text that carries one, or an empty list. Codex records
  * `payload.rate_limits.{primary,secondary}` there after each model call, each
  * with `used_percent` (0–100), `window_minutes` and `resets_at` (epoch
- * seconds); the fuller of the two windows is the one that will stop a
- * session first, so that is the one returned. Never `rejected`: a refusal
- * reaches the app as the turn's error, not through this file.
+ * seconds). `window_minutes` names the window: 300 is the five-hour one,
+ * 10080 the weekly one; any other length is returned without a
+ * `rateLimitType`. Never `rejected`: a refusal reaches the app as the turn's
+ * error, not through this file.
  *
- * Exported for this module's tests.
+ * Exported for this module's tests; `server/index.ts` reads it through
+ * `getCodexRateLimitWindows` to keep the provider limits store current.
  */
-export function findCodexRateLimitStatus(fileContent: string): RateLimitStatus | null {
+export function findCodexRateLimitWindows(fileContent: string): RateLimitStatus[] {
   const lines = fileContent.trim().split('\n');
 
   for (let index = lines.length - 1; index >= 0; index -= 1) {
@@ -246,40 +248,52 @@ export function findCodexRateLimitStatus(fileContent: string): RateLimitStatus |
         continue;
       }
 
-      let fullest: AnyRecord | null = null;
+      const windows: RateLimitStatus[] = [];
       for (const windowName of ['primary', 'secondary']) {
         const window = rateLimits[windowName] as AnyRecord | null | undefined;
-        if (
-          window
-          && typeof window.used_percent === 'number'
-          && Number.isFinite(window.used_percent)
-          && (!fullest || window.used_percent > fullest.used_percent)
-        ) {
-          fullest = window;
+        if (!window || typeof window.used_percent !== 'number' || !Number.isFinite(window.used_percent)) {
+          continue;
         }
+        const usedPercent = Math.min(100, Math.max(0, window.used_percent));
+        const resetsAt = typeof window.resets_at === 'number' && Number.isFinite(window.resets_at)
+          ? new Date(window.resets_at * 1000).toISOString()
+          : typeof window.resets_at === 'string' ? window.resets_at : undefined;
+        windows.push({
+          status: usedPercent >= CODEX_WARNING_PERCENT ? 'allowed_warning' : 'allowed',
+          rateLimitType: window.window_minutes === 300
+            ? 'five_hour'
+            : window.window_minutes === 10_080 ? 'seven_day' : undefined,
+          utilization: usedPercent / 100,
+          resetsAt,
+        });
       }
-      if (!fullest) {
-        continue;
+      if (windows.length > 0) {
+        return windows;
       }
-
-      const usedPercent = Math.min(100, Math.max(0, fullest.used_percent as number));
-      const resetsAt = typeof fullest.resets_at === 'number' && Number.isFinite(fullest.resets_at)
-        ? new Date(fullest.resets_at * 1000).toISOString()
-        : typeof fullest.resets_at === 'string' ? fullest.resets_at : undefined;
-      return {
-        status: usedPercent >= CODEX_WARNING_PERCENT ? 'allowed_warning' : 'allowed',
-        rateLimitType: fullest.window_minutes === 300
-          ? 'five_hour'
-          : fullest.window_minutes === 10_080 ? 'seven_day' : undefined,
-        utilization: usedPercent / 100,
-        resetsAt,
-      };
     } catch {
       // A provider may be writing the last JSONL line while this read happens.
     }
   }
 
-  return null;
+  return [];
+}
+
+/**
+ * Codex's own plan-limit reading from the newest `token_count` row in the
+ * given rollout JSONL text, or null when it has none: of the windows
+ * `findCodexRateLimitWindows` finds, the fuller one is the one that will
+ * stop a session first, so that is the one returned.
+ *
+ * Exported for this module's tests.
+ */
+export function findCodexRateLimitStatus(fileContent: string): RateLimitStatus | null {
+  let fullest: RateLimitStatus | null = null;
+  for (const window of findCodexRateLimitWindows(fileContent)) {
+    if (!fullest || (window.utilization ?? 0) > (fullest.utilization ?? 0)) {
+      fullest = window;
+    }
+  }
+  return fullest;
 }
 
 function emptyCodexTokenUsage(): TokenUsageResult {
@@ -465,6 +479,30 @@ export function createProviderTokenUsageService(
 ) {
   const dependencies = { ...defaultDependencies, ...dependencyOverrides };
 
+  // The tail of one Codex app session's rollout file, or null when the
+  // session is not Codex, has no rollout yet, or the read fails.
+  const readCodexRolloutTail = async (sessionId: string): Promise<string | null> => {
+    try {
+      const session = dependencies.getSessionById(sessionId);
+      if (!session || session.provider !== 'codex') {
+        return null;
+      }
+      const sessionFilePath = session.jsonl_path && dependencies.fileExists(session.jsonl_path)
+        ? session.jsonl_path
+        : await findCodexSessionFile(
+          path.join(dependencies.getHomeDirectory(), '.codex', 'sessions'),
+          session.provider_session_id || sessionId,
+          dependencies,
+        );
+      if (!sessionFilePath) {
+        return null;
+      }
+      return (await dependencies.readTextFileTail(sessionFilePath, TOKEN_USAGE_TAIL_BYTES)).content;
+    } catch {
+      return null;
+    }
+  };
+
   return {
     /**
      * Codex's latest plan-limit reading for one app session, read from the
@@ -475,26 +513,19 @@ export function createProviderTokenUsageService(
      * `server/index.ts` when a Codex turn ends.
      */
     async getCodexRateLimitStatus(sessionId: string): Promise<RateLimitStatus | null> {
-      try {
-        const session = dependencies.getSessionById(sessionId);
-        if (!session || session.provider !== 'codex') {
-          return null;
-        }
-        const sessionFilePath = session.jsonl_path && dependencies.fileExists(session.jsonl_path)
-          ? session.jsonl_path
-          : await findCodexSessionFile(
-            path.join(dependencies.getHomeDirectory(), '.codex', 'sessions'),
-            session.provider_session_id || sessionId,
-            dependencies,
-          );
-        if (!sessionFilePath) {
-          return null;
-        }
-        const tail = await dependencies.readTextFileTail(sessionFilePath, TOKEN_USAGE_TAIL_BYTES);
-        return findCodexRateLimitStatus(tail.content);
-      } catch {
-        return null;
-      }
+      const tail = await readCodexRolloutTail(sessionId);
+      return tail === null ? null : findCodexRateLimitStatus(tail);
+    },
+
+    /**
+     * Every plan-limit window (five-hour, weekly) of Codex's latest reading
+     * for one app session; an empty list where `getCodexRateLimitStatus`
+     * would return null. Never throws. Used by `server/index.ts` when a
+     * Codex turn ends, to keep the provider limits store current.
+     */
+    async getCodexRateLimitWindows(sessionId: string): Promise<RateLimitStatus[]> {
+      const tail = await readCodexRolloutTail(sessionId);
+      return tail === null ? [] : findCodexRateLimitWindows(tail);
     },
 
     /**

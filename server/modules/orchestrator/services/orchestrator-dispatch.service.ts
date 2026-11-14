@@ -36,6 +36,7 @@ import type {
   OrchestratorSubtask,
   OrchestratorSubtaskAccess,
   OrchestratorSubtaskResult,
+  ProviderFatalFailureCause,
   ProviderRole,
 } from '@/shared/types.js';
 
@@ -61,7 +62,7 @@ const MAX_PAUSE_SLICE_MS = 5 * 60 * 1000;
  * say until when a backend is at its usage limit (null: it is free).
  */
 export type OrchestratorRunDependencies = {
-  runTurn(input: { sessionId: string; userId: number; content: string; options?: Record<string, unknown> }): Promise<{ started: boolean; error: string | null }>;
+  runTurn(input: { sessionId: string; userId: number; content: string; options?: Record<string, unknown> }): Promise<{ started: boolean; error: string | null; failureCause?: ProviderFatalFailureCause }>;
   readLastReply(sessionId: string): Promise<string | null>;
   abortTurn(sessionId: string): Promise<void>;
   limitedUntil(provider: LLMProvider): number | null;
@@ -377,7 +378,7 @@ async function runTrackedTurn(
   state: RunState,
   input: { sessionId: string; content: string; options?: Record<string, unknown> },
   dependencies: OrchestratorRunDependencies,
-): Promise<{ started: boolean; error: string | null }> {
+): Promise<{ started: boolean; error: string | null; failureCause?: ProviderFatalFailureCause }> {
   const control = controlOf(state.run.id);
   control.activeTurns.add(input.sessionId);
   try {
@@ -399,6 +400,20 @@ function coordinatorCandidates(state: RunState): LLMProvider[] {
 function subtaskCandidates(state: RunState, subtask: OrchestratorSubtask): LLMProvider[] {
   return listRoleCandidates(subtask.role, state.providerRoles, state.preferredOrder)
     .filter((provider) => !isTextOnlyProvider(provider) || (state.textOnlyRoles ?? []).includes(subtask.role));
+}
+
+/** Human-readable reason, per cause, for a backend no retry or other backend can stand in for. */
+const FATAL_FAILURE_REASONS: Record<ProviderFatalFailureCause, string> = {
+  cli_missing: 'its CLI is not installed',
+  auth_required: 'it is not signed in or its sign-in has expired',
+  unknown_model: 'the requested model does not exist or is not available to the account',
+};
+
+// The reason recorded on a subtask or run that failed fast; the backend's own
+// error text is kept after it so nothing the user needs is lost.
+function describeFatalFailure(provider: LLMProvider, cause: ProviderFatalFailureCause, detail: string | null): string {
+  const reason = `${provider} cannot work: ${FATAL_FAILURE_REASONS[cause]}. Not passed to another backend — fix this and continue the task.`;
+  return detail ? `${reason} (${detail})` : reason;
 }
 
 /**
@@ -447,6 +462,15 @@ async function askCoordinator<T>(
       const before = await dependencies.readLastReply(sessionId).catch(() => null);
       const turn = await runTrackedTurn(state, { sessionId, content }, dependencies);
       throwIfStopped(state);
+      // Fail fast: a backend that cannot work at all (CLI missing, sign-in,
+      // unknown model) is not replaced by the next one in the chain — that
+      // would only spend its limit on a setup problem the user has to fix.
+      if (turn.failureCause) {
+        throw new AppError(describeFatalFailure(provider, turn.failureCause, turn.error), {
+          code: 'ORCHESTRATOR_BACKEND_UNUSABLE',
+          statusCode: 502,
+        });
+      }
       const reply = turn.started ? await dependencies.readLastReply(sessionId) : null;
       // A failed turn leaves the previous reply as the last one; that is not an answer to this request.
       const answered = Boolean(reply) && !(turn.error && reply === before);
@@ -514,6 +538,7 @@ async function runDelegatedTurn(
   const fail = (status: 'failed' | 'skipped', error: string): SubtaskReport => {
     entry.status = status;
     entry.error = error;
+    delete entry.failureCause;
     return { title: turnPlan.title, status, result: error };
   };
 
@@ -535,6 +560,7 @@ async function runDelegatedTurn(
       entry.sessionId = sessionId;
       entry.status = 'running';
       delete entry.error;
+      delete entry.failureCause;
       save(state);
 
       const turn = await runTrackedTurn(state, {
@@ -542,6 +568,15 @@ async function runDelegatedTurn(
         content: turnPlan.buildContent(provider, takenOver),
         options: buildSubtaskTurnOptions(provider, turnPlan.access),
       }, dependencies);
+      // Fail fast: the next backend in the chain is not tried for a failure
+      // no backend can fix (CLI missing, sign-in, unknown model) — the
+      // subtask is failed with the reason, and no other limit is spent on it.
+      if (turn.failureCause) {
+        throwIfStopped(state);
+        const report = fail('failed', describeFatalFailure(provider, turn.failureCause, turn.error));
+        entry.failureCause = turn.failureCause;
+        return report;
+      }
       const reply = turn.started ? await dependencies.readLastReply(sessionId) : null;
       // Work that finished is kept even when "stop" arrived during it.
       if (reply && !turn.error) {

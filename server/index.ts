@@ -13,14 +13,15 @@ import { AppError, findApplicationRoot, getModuleDirectory, IS_PLATFORM, termina
 import type { LLMProvider, ProviderLimitReason, RateLimitStatus } from '@/shared/types.js';
 import {
     closeSessionsWatcher,
-    detectProviderLimit,
     initializeSessionsWatcher,
+    providerLimitsStore,
     providerRuntimeService,
     providerTokenUsageService,
     reapOrphanedOpenCodeServers,
 } from '@/modules/providers/index.js';
 import { broadcastToConnectedClients, chatRunRegistry, createWebSocketServer, onRunSettled, setDefaultChatRunHooks } from '@/modules/websocket/index.js';
 import {
+    decideHandoffForRunFailure,
     DEFAULT_HANDOFF_THRESHOLD_PERCENT,
     handoffSessionOnLimit,
     readStoredFallbackOrder,
@@ -200,17 +201,27 @@ function readHandoffUserId(userId: string | number | null): number | null {
 }
 
 /**
- * A run's error text — thrown, or sent by the runtime as an `error` message —
- * checked for that provider's limit wording. This is the only limit signal
- * Codex and the API provider give; Claude's arrives as `rate_limit_status`.
+ * A run's error — thrown, or sent by the runtime as an `error` message, with
+ * the provider's structured code when it has one — classified by
+ * `decideHandoffForRunFailure`. A limit moves the session; a failure no
+ * backend can fix (CLI missing, sign-in missing/expired, unknown model)
+ * fails fast: no relay is started, so no fallback's limit is spent on it,
+ * and the chat already shows the error labelled with its cause. Codex and
+ * the API provider report limits only this way; Claude's also arrives as
+ * `rate_limit_status`.
  */
-function handleRunFailureForAutoHandoff(input: { provider: LLMProvider; sessionId: string; userId: string | number | null; message: string }): void {
-    const detection = detectProviderLimit(input.provider, { message: input.message });
-    const userId = readHandoffUserId(input.userId);
-    if (!detection.detected || userId === null) {
+function handleRunFailureForAutoHandoff(input: { provider: LLMProvider; sessionId: string; userId: string | number | null; message: string; errorCode?: string }): void {
+    const decision = decideHandoffForRunFailure(input.provider, { message: input.message, errorCode: input.errorCode });
+    if (decision.action === 'fail_fast') {
+        pendingHandoffSuggestions.delete(input.sessionId);
+        console.warn('[Handoff] Not relaying a failure no backend can fix', { sessionId: input.sessionId, provider: input.provider, cause: decision.cause });
         return;
     }
-    startAutoHandoff({ sessionId: input.sessionId, userId, reason: detection.reason });
+    const userId = readHandoffUserId(input.userId);
+    if (decision.action !== 'handoff' || userId === null) {
+        return;
+    }
+    startAutoHandoff({ sessionId: input.sessionId, userId, reason: decision.reason });
 }
 
 /**
@@ -223,6 +234,8 @@ function handleRunFailureForAutoHandoff(input: { provider: LLMProvider; sessionI
  * turn ends the user is offered the switch, one time per session.
  */
 function handleRateLimitStatusForAutoHandoff(input: { provider: LLMProvider; sessionId: string; userId: string | number | null; status: RateLimitStatus }): void {
+    // Kept for Settings → Agents → Subscription limits, whoever's turn it was.
+    providerLimitsStore.record(input.provider, input.status);
     const userId = readHandoffUserId(input.userId);
     if (userId === null) {
         return;
@@ -302,6 +315,13 @@ function handleRunCompletedForUsage(input: { provider: LLMProvider; sessionId: s
     if (input.provider !== 'codex') {
         return;
     }
+    // Both windows go to the limits store; the fuller one drives the display
+    // and the threshold below, as before.
+    void providerTokenUsageService.getCodexRateLimitWindows(input.sessionId).then((windows) => {
+        for (const window of windows) {
+            providerLimitsStore.record('codex', window);
+        }
+    });
     void providerTokenUsageService.getCodexRateLimitStatus(input.sessionId).then((status) => {
         if (!status) {
             return;
