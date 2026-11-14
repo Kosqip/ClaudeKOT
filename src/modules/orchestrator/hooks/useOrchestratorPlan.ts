@@ -6,7 +6,8 @@ import type { LLMProvider } from '@/shared/types';
 /** One subtask of an orchestrated task as the server reports it (mirrors the server's `OrchestratorSubtaskResult`). */
 export type OrchestratorSubtaskResult = {
   title: string;
-  role: 'hands' | 'routine';
+  /** `orchestrator` only for a pair run's reviewer turn. */
+  role: 'orchestrator' | 'hands' | 'routine';
   access: 'read' | 'write';
   round: number;
   status: 'pending' | 'running' | 'done' | 'failed' | 'skipped';
@@ -15,6 +16,23 @@ export type OrchestratorSubtaskResult = {
   error?: string;
   /** Backends that began the subtask and ran out of usage before `provider` took it over. */
   movedFrom?: LLMProvider[];
+  /** Set only in a pair run: the writer's or the reviewer's turn. */
+  pairPart?: 'writer' | 'reviewer';
+};
+
+/** How a run works: `plan` splits the task into subtasks, `pair` runs a writer and a read-only reviewer in turns. */
+export type OrchestratorRunMode = 'plan' | 'pair';
+
+/** One reviewer finding of a pair run (mirrors the server's `OrchestratorReviewFinding`). */
+type OrchestratorReviewFinding = { severity: 'P0' | 'P1' | 'P2'; text: string };
+
+/** One round of a pair run (mirrors the server's `OrchestratorPairRound`); unset fields mean that turn has not finished yet. */
+type OrchestratorPairRound = {
+  round: number;
+  writerDone?: boolean;
+  verdict?: 'approved' | 'changes';
+  findings: OrchestratorReviewFinding[];
+  userContinued?: boolean;
 };
 
 /** One orchestrated task from start to finish (mirrors the server's `OrchestratorRun`). */
@@ -29,7 +47,13 @@ export type OrchestratorRun = {
   /** The backend and session that plan and review now; they change when the orchestrator's backend runs out of usage. */
   coordinatorProvider?: LLMProvider;
   coordinatorSessionId?: string;
-  pauseReason?: 'limit' | 'restart';
+  /** `decision`: a pair run stuck on the same P0/P1 finding two rounds in a row, waiting for the user. */
+  pauseReason?: 'limit' | 'restart' | 'decision';
+  /** Unset means `plan`. */
+  mode?: OrchestratorRunMode;
+  pairRounds?: OrchestratorPairRound[];
+  /** How a finished pair run ended: approved, or out of rounds with findings open. */
+  pairOutcome?: 'approved' | 'rounds';
   waitingFor?: LLMProvider;
   resumeAt?: string;
   summary?: string;
@@ -110,11 +134,11 @@ export function useOrchestratorPlan(sessionId: string) {
     return () => clearInterval(timer);
   }, [runId, active]);
 
-  const start = useCallback(async (task: string, maxRounds: number): Promise<void> => {
+  const start = useCallback(async (task: string, maxRounds: number, mode: OrchestratorRunMode = 'plan'): Promise<void> => {
     setIsStarting(true);
     setError(null);
     try {
-      setRun(await readRun(await api.orchestrator.plan({ sessionId, task, maxRounds })));
+      setRun(await readRun(await api.orchestrator.plan({ sessionId, task, maxRounds, mode })));
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'The orchestrator request failed.');
     } finally {

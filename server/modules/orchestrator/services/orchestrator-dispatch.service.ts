@@ -4,26 +4,37 @@ import { orchestratorRunsDb, sessionsDb } from '@/modules/database/index.js';
 import { getProviderLimitedUntil } from '@/modules/handoff/index.js';
 import {
   buildCoordinatorTakeoverNote,
+  buildPairReviewPrompt,
+  buildPairReviewRetryPrompt,
+  buildPairWriterPrompt,
   buildPlanRequestPrompt,
   buildPlanRetryPrompt,
   buildReviewPrompt,
   buildSubtaskPrompt,
   buildSubtaskTurnOptions,
+  findRepeatedPairFindings,
   groupSubtasksIntoSteps,
   isTextOnlyProvider,
+  listOpenPairFindings,
   listRoleCandidates,
   parseOrchestratorPlan,
   parseOrchestratorReview,
+  parsePairReview,
+  parsePairWriterDone,
+  stripPairWriterStatus,
 } from '@/modules/orchestrator/services/orchestrator-plan.service.js';
-import type { OrchestratorReview, SubtaskReport } from '@/modules/orchestrator/services/orchestrator-plan.service.js';
+import type { OrchestratorReview, PairReview, SubtaskReport } from '@/modules/orchestrator/services/orchestrator-plan.service.js';
 import { sessionsService } from '@/modules/providers/index.js';
 import type { ProviderRuntimeGateway } from '@/modules/websocket/index.js';
 import { chatRunRegistry, runDetachedChatTurn } from '@/modules/websocket/index.js';
 import { AppError } from '@/shared/utils.js';
 import type {
   LLMProvider,
+  OrchestratorPairRound,
   OrchestratorRun,
+  OrchestratorRunMode,
   OrchestratorSubtask,
+  OrchestratorSubtaskAccess,
   OrchestratorSubtaskResult,
   ProviderRole,
 } from '@/shared/types.js';
@@ -32,6 +43,10 @@ import type {
 export const DEFAULT_ORCHESTRATOR_MAX_ROUNDS = 2;
 /** Upper bound on rounds a caller may ask for — each one spends every involved backend's quota. */
 export const ORCHESTRATOR_MAX_ROUNDS_LIMIT = 4;
+/** Writer–reviewer rounds a pair run gets when the caller names none. */
+export const DEFAULT_PAIR_MAX_ROUNDS = 3;
+/** Upper bound on a pair run's rounds; read by `orchestrator.routes.ts` to validate the request. */
+export const PAIR_MAX_ROUNDS_LIMIT = 5;
 /** Finished runs kept in memory for the UI to read back. */
 const MAX_REMEMBERED_RUNS = 50;
 /** How many backends one step may be passed along before it is given up on — a guard against two backends bouncing it forever. */
@@ -97,6 +112,8 @@ type RunState = {
   reports: Array<SubtaskReport | null>;
   /** The session each backend coordinates this run in, once it has had to. */
   coordinatorSessions: Partial<Record<LLMProvider, string>>;
+  /** Pair runs only: the writer's report of each round (index = round - 1), kept for the reviewer and the next writer turn. */
+  pairWriterReports?: string[];
 };
 
 /** What exists only while the process lives: the stop flag, the turns going now, and how to end a pause early. */
@@ -159,7 +176,9 @@ function ensureRestored(): void {
     if (!state?.run?.id || !Array.isArray(state.run.subtasks) || runs.has(state.run.id)) {
       continue;
     }
-    if (isActive(state.run) && !(state.run.phase === 'paused' && state.run.pauseReason === 'limit')) {
+    // A run paused on a limit or waiting for the user's decision lost nothing with the process.
+    const keepsItsPause = state.run.phase === 'paused' && (state.run.pauseReason === 'limit' || state.run.pauseReason === 'decision');
+    if (isActive(state.run) && !keepsItsPause) {
       state.run.phase = 'paused';
       state.run.pauseReason = 'restart';
       delete state.run.resumeAt;
@@ -175,7 +194,11 @@ function ensureRestored(): void {
 }
 
 function snapshot(run: OrchestratorRun): OrchestratorRun {
-  return { ...run, subtasks: run.subtasks.map((subtask) => ({ ...subtask })) };
+  const copy: OrchestratorRun = { ...run, subtasks: run.subtasks.map((subtask) => ({ ...subtask })) };
+  if (run.pairRounds) {
+    copy.pairRounds = run.pairRounds.map((round) => ({ ...round, findings: round.findings.map((finding) => ({ ...finding })) }));
+  }
+  return copy;
 }
 
 /** One run as it stands now, or null for an unknown id. Used by `orchestrator.routes.ts`. */
@@ -461,43 +484,53 @@ async function askCoordinator<T>(
 }
 
 /**
- * Runs one subtask to the end in a new session of the first free backend of
- * its role's chain, and reports how it went. A backend that hits its usage
- * limit mid-subtask is passed over: the next one in the chain gets the same
- * subtask in a session of its own, told that the work was begun and to
- * check the folder before redoing anything. With nobody free the run
- * pauses until a limit resets, then goes on from here.
+ * One turn handed to a role's chain: who may take it (best first), what to
+ * say when nobody may, its access, and its message — built per backend,
+ * since a text-only backend and one taking over cut-off work are told so.
  */
-async function runSubtask(
+type DelegatedTurn = {
+  title: string;
+  access: OrchestratorSubtaskAccess;
+  candidates: LLMProvider[];
+  noCandidatesError: string;
+  buildContent: (provider: LLMProvider, takenOver: boolean) => string;
+};
+
+/**
+ * Runs one delegated turn to the end in a new session of the first free
+ * backend of its candidates, and reports how it went. A backend that hits
+ * its usage limit mid-turn is passed over: the next candidate gets the same
+ * work in a session of its own, told that it was begun and to check the
+ * folder before redoing anything. With nobody free the run pauses until a
+ * limit resets, then goes on from here. Plan subtasks and both turns of a
+ * pair round go through here.
+ */
+async function runDelegatedTurn(
   state: RunState,
   entry: OrchestratorSubtaskResult,
-  subtask: OrchestratorSubtask,
-  earlier: SubtaskReport[],
+  turnPlan: DelegatedTurn,
   dependencies: OrchestratorRunDependencies,
 ): Promise<SubtaskReport> {
   const fail = (status: 'failed' | 'skipped', error: string): SubtaskReport => {
     entry.status = status;
     entry.error = error;
-    return { title: subtask.title, status, result: error };
+    return { title: turnPlan.title, status, result: error };
   };
 
-  const candidates = subtaskCandidates(state, subtask);
-  if (candidates.length === 0) {
-    return fail('skipped', listRoleCandidates(subtask.role, state.providerRoles).length === 0
-      ? `No backend has the "${subtask.role}" role assigned.`
-      : 'The only backend left for this role is a text model, and this subtask needs the project folder.');
+  if (turnPlan.candidates.length === 0) {
+    return fail('skipped', turnPlan.noCandidatesError);
   }
 
-  // A subtask that already has a session was begun before (a restart cut it off).
+  // A turn that already has a session was begun before (a restart cut it off).
   let takenOver = Boolean(entry.sessionId);
   for (let attempt = 0; attempt < MAX_ATTEMPTS_PER_STEP; attempt += 1) {
-    const provider = await acquireProvider(state, candidates, 'running', dependencies);
+    const provider = await acquireProvider(state, turnPlan.candidates, 'running', dependencies);
     if (!provider) {
       break;
     }
     try {
       const sessionId = randomUUID();
-      sessionsDb.createAppSession(sessionId, provider, state.projectPath, subtask.title);
+      sessionsDb.createAppSession(sessionId, provider, state.projectPath, turnPlan.title);
       entry.provider = provider;
       entry.sessionId = sessionId;
       entry.status = 'running';
@@ -506,14 +539,14 @@ async function runSubtask(
 
       const turn = await runTrackedTurn(state, {
         sessionId,
-        content: buildSubtaskPrompt(subtask, earlier, isTextOnlyProvider(provider), takenOver),
-        options: buildSubtaskTurnOptions(provider, subtask.access),
+        content: turnPlan.buildContent(provider, takenOver),
+        options: buildSubtaskTurnOptions(provider, turnPlan.access),
       }, dependencies);
       const reply = turn.started ? await dependencies.readLastReply(sessionId) : null;
       // Work that finished is kept even when "stop" arrived during it.
       if (reply && !turn.error) {
         entry.status = 'done';
-        return { title: subtask.title, status: 'done', result: reply };
+        return { title: turnPlan.title, status: 'done', result: reply };
       }
       throwIfStopped(state);
       if (dependencies.limitedUntil(provider) !== null) {
@@ -525,7 +558,7 @@ async function runSubtask(
       }
       if (reply) {
         entry.status = 'done';
-        return { title: subtask.title, status: 'done', result: reply };
+        return { title: turnPlan.title, status: 'done', result: reply };
       }
       return fail('failed', turn.error ?? (turn.started
         ? 'The backend finished without a reply — open its session for the reason.'
@@ -538,6 +571,25 @@ async function runSubtask(
     }
   }
   return fail('failed', 'Every backend that could take this subtask ran out of usage.');
+}
+
+/** Runs one subtask of a plan on its role's chain (see `runDelegatedTurn`). */
+async function runSubtask(
+  state: RunState,
+  entry: OrchestratorSubtaskResult,
+  subtask: OrchestratorSubtask,
+  earlier: SubtaskReport[],
+  dependencies: OrchestratorRunDependencies,
+): Promise<SubtaskReport> {
+  return runDelegatedTurn(state, entry, {
+    title: subtask.title,
+    access: subtask.access,
+    candidates: subtaskCandidates(state, subtask),
+    noCandidatesError: listRoleCandidates(subtask.role, state.providerRoles).length === 0
+      ? `No backend has the "${subtask.role}" role assigned.`
+      : 'The only backend left for this role is a text model, and this subtask needs the project folder.',
+    buildContent: (provider, takenOver) => buildSubtaskPrompt(subtask, earlier, isTextOnlyProvider(provider), takenOver),
+  }, dependencies);
 }
 
 function beginRound(state: RunState, round: number, plan: OrchestratorSubtask[]): void {
@@ -553,6 +605,170 @@ function beginRound(state: RunState, round: number, plan: OrchestratorSubtask[])
   })));
 }
 
+/** Opens round `round` of a pair run: its public record and the writer's entry. */
+function beginPairRound(state: RunState, round: number): void {
+  state.run.round = round;
+  state.run.pairRounds = [...(state.run.pairRounds ?? []), { round, findings: [] }];
+  state.run.subtasks.push({ title: `Writer — round ${round}`, role: 'hands', access: 'write', round, status: 'pending', pairPart: 'writer' });
+}
+
+/**
+ * Who may review a pair round: the `orchestrator` chain first (then `hands`),
+ * never the backend that wrote this round, and never a text-only one — the
+ * review reads the project folder. Only when no other backend holds any
+ * role of the chain does the writer's own backend review, in a separate
+ * read-only session, rather than the round going unreviewed.
+ */
+function pairReviewerCandidates(state: RunState, writer: LLMProvider | undefined): LLMProvider[] {
+  const chain = listRoleCandidates('orchestrator', state.providerRoles, state.preferredOrder)
+    .filter((provider) => !isTextOnlyProvider(provider));
+  const others = chain.filter((provider) => provider !== writer);
+  return others.length > 0 ? others : chain;
+}
+
+function pairEntry(state: RunState, round: number, part: 'writer' | 'reviewer'): OrchestratorSubtaskResult | undefined {
+  return state.run.subtasks.find((subtask) => subtask.round === round && subtask.pairPart === part);
+}
+
+/** Thrown when a pair turn ends without a usable result; the run fails and "Continue now" redoes that turn. */
+function pairTurnFailed(part: 'writer' | 'reviewer', report: SubtaskReport): AppError {
+  return new AppError(`The ${part} could not finish this round: ${report.result}`, {
+    code: 'ORCHESTRATOR_PAIR_TURN_FAILED',
+    statusCode: 502,
+  });
+}
+
+/**
+ * Asks the reviewer's session once more when its verdict did not parse —
+ * the same session, so the reviewer still has the folder and its own notes
+ * at hand. A second miss fails the run (resumable: the review is redone).
+ */
+async function readPairVerdict(
+  state: RunState,
+  entry: OrchestratorSubtaskResult,
+  firstReply: string,
+  dependencies: OrchestratorRunDependencies,
+): Promise<PairReview> {
+  try {
+    return parsePairReview(firstReply);
+  } catch (error) {
+    const problem = error instanceof Error ? error.message.split('\n')[0] : 'it was not in the required format.';
+    const sessionId = entry.sessionId!;
+    const turn = await runTrackedTurn(state, {
+      sessionId,
+      content: buildPairReviewRetryPrompt(problem),
+      options: buildSubtaskTurnOptions(entry.provider!, 'read'),
+    }, dependencies);
+    throwIfStopped(state);
+    const secondReply = turn.started ? await dependencies.readLastReply(sessionId) : null;
+    return parsePairReview(secondReply ?? '');
+  }
+}
+
+/**
+ * The life of a pair run, entered again on resume like `executeRun`: each
+ * round is a writer turn (the `hands` chain, full access) and then a review
+ * turn (another backend, read-only), and every result is saved the moment
+ * it exists, so a restart redoes only the turn that had none. The run ends
+ * when the writer says it is done and the reviewer has no open P0/P1
+ * finding, or when the rounds run out. A P0/P1 finding that is still open
+ * from the round before pauses the run for the user (`pauseReason:
+ * 'decision'`) instead of spending more rounds on it.
+ */
+async function executePairRun(state: RunState, dependencies: OrchestratorRunDependencies): Promise<void> {
+  const { run } = state;
+  state.pairWriterReports ??= [];
+  if (!run.pairRounds?.length) {
+    beginPairRound(state, 1);
+  }
+
+  for (;;) {
+    throwIfStopped(state);
+    const rounds = run.pairRounds!;
+    const current = rounds[rounds.length - 1];
+    const previous: OrchestratorPairRound | undefined = rounds[rounds.length - 2];
+    const previousFindings = previous?.findings ?? [];
+
+    if (current.writerDone === undefined) {
+      run.phase = 'running';
+      save(state);
+      const writerEntry = pairEntry(state, current.round, 'writer')!;
+      const report = await runDelegatedTurn(state, writerEntry, {
+        title: writerEntry.title,
+        access: 'write',
+        candidates: listRoleCandidates('hands', state.providerRoles, state.preferredOrder)
+          .filter((provider) => !isTextOnlyProvider(provider)),
+        noCandidatesError: 'No backend that can work in the project folder holds the "hands" role (or stands in for it).',
+        buildContent: (_provider, takenOver) => buildPairWriterPrompt({
+          task: run.task,
+          round: current.round,
+          previousFindings,
+          previousReport: state.pairWriterReports![current.round - 2] ?? null,
+          userContinued: Boolean(current.userContinued),
+          takenOver,
+        }),
+      }, dependencies);
+      throwIfStopped(state);
+      if (report.status !== 'done') {
+        throw pairTurnFailed('writer', report);
+      }
+      state.pairWriterReports![current.round - 1] = stripPairWriterStatus(report.result);
+      current.writerDone = parsePairWriterDone(report.result);
+      save(state);
+    }
+
+    if (current.verdict === undefined) {
+      run.phase = 'reviewing';
+      let reviewerEntry = pairEntry(state, current.round, 'reviewer');
+      if (!reviewerEntry) {
+        reviewerEntry = { title: `Reviewer — round ${current.round}`, role: 'orchestrator', access: 'read', round: current.round, status: 'pending', pairPart: 'reviewer' };
+        run.subtasks.push(reviewerEntry);
+      }
+      save(state);
+      const writerReport = state.pairWriterReports![current.round - 1] ?? '';
+      const entry = reviewerEntry;
+      const report = await runDelegatedTurn(state, entry, {
+        title: entry.title,
+        access: 'read',
+        candidates: pairReviewerCandidates(state, pairEntry(state, current.round, 'writer')?.provider),
+        noCandidatesError: 'No backend that can read the project folder is free to review.',
+        buildContent: () => buildPairReviewPrompt({ task: run.task, round: current.round, writerReport, previousFindings }),
+      }, dependencies);
+      throwIfStopped(state);
+      if (report.status !== 'done') {
+        throw pairTurnFailed('reviewer', report);
+      }
+      const verdict = await readPairVerdict(state, entry, report.result, dependencies);
+      current.verdict = verdict.status;
+      current.findings = verdict.findings;
+      save(state);
+    }
+
+    if (current.writerDone && listOpenPairFindings(current).length === 0) {
+      run.pairOutcome = 'approved';
+      run.summary = state.pairWriterReports![current.round - 1] ?? '';
+      run.phase = 'done';
+      save(state);
+      return;
+    }
+    if (current.round >= run.maxRounds) {
+      run.pairOutcome = 'rounds';
+      run.summary = state.pairWriterReports![current.round - 1] ?? '';
+      run.phase = 'done';
+      save(state);
+      return;
+    }
+    if (previous && !current.userContinued && findRepeatedPairFindings(previous, current).length > 0) {
+      run.phase = 'paused';
+      run.pauseReason = 'decision';
+      save(state);
+      return;
+    }
+    beginPairRound(state, current.round + 1);
+    save(state);
+  }
+}
+
 /**
  * The whole life of one run after its request has been accepted; never
  * throws — a failure ends up on the run itself. Written to be entered
@@ -565,6 +781,10 @@ async function executeRun(state: RunState, dependencies: OrchestratorRunDependen
   const control = controlOf(run.id);
   control.executing = true;
   try {
+    if (run.mode === 'pair') {
+      await executePairRun(state, dependencies);
+      return;
+    }
     if (!state.plan) {
       run.phase = 'planning';
       state.textOnlyRoles = (['hands', 'routine'] as const).filter((role) => {
@@ -662,11 +882,20 @@ export function resumeOrchestratorRun(
     }
   } else if (state.run.phase === 'paused' || state.run.phase === 'failed') {
     control.cancelled = false;
+    if (state.run.pauseReason === 'decision') {
+      // The user chose to go on past a finding that came back: the next round
+      // is told so, and the same finding does not stop the run again there.
+      const lastRound = state.run.pairRounds?.[state.run.pairRounds.length - 1];
+      if (lastRound) {
+        beginPairRound(state, lastRound.round + 1);
+        state.run.pairRounds![state.run.pairRounds!.length - 1].userContinued = true;
+      }
+    }
     delete state.run.error;
     delete state.run.pauseReason;
     delete state.run.resumeAt;
     delete state.run.waitingFor;
-    state.run.phase = state.plan ? 'running' : 'planning';
+    state.run.phase = state.plan || state.run.mode === 'pair' ? 'running' : 'planning';
     finished = executeRun(state, dependencies);
   }
   return { run: snapshot(state.run), finished };
@@ -703,6 +932,10 @@ export function restoreOrchestratorRuns(dependencies: OrchestratorRunDependencie
  * resets instead of failing. The state is saved after every step, so a
  * restart loses no finished work.
  *
+ * With `mode: 'pair'` there is no plan: a writer (the `hands` chain) and a
+ * read-only reviewer (another backend, the `orchestrator` chain first) take
+ * turns on the whole task — see `executePairRun`.
+ *
  * Progress is read back with `getOrchestratorRun`; nothing here waits for
  * the run to finish. A backend never starts subtasks of its own: delegation
  * is always decided by the one orchestrator session, round by round.
@@ -718,6 +951,8 @@ export function startOrchestratorRun(
     /** The user's own backend order; decides between backends holding the same role. */
     preferredOrder?: LLMProvider[];
     maxRounds?: number;
+    /** `plan` (the default) or `pair` — see `OrchestratorRunMode`. */
+    mode?: OrchestratorRunMode;
   },
   dependencies: OrchestratorRunDependencies,
 ): { run: OrchestratorRun; finished: Promise<void> } {
@@ -747,15 +982,20 @@ export function startOrchestratorRun(
     }
   }
 
+  const mode: OrchestratorRunMode = input.mode === 'pair' ? 'pair' : 'plan';
+  const roundsLimit = mode === 'pair' ? PAIR_MAX_ROUNDS_LIMIT : ORCHESTRATOR_MAX_ROUNDS_LIMIT;
+  const defaultRounds = mode === 'pair' ? DEFAULT_PAIR_MAX_ROUNDS : DEFAULT_ORCHESTRATOR_MAX_ROUNDS;
   const state: RunState = {
     run: {
       id: randomUUID(),
       orchestratorSessionId: input.orchestratorSessionId,
       task: input.task,
-      phase: 'planning',
+      mode,
+      phase: mode === 'pair' ? 'running' : 'planning',
       round: 0,
-      maxRounds: Math.min(ORCHESTRATOR_MAX_ROUNDS_LIMIT, Math.max(1, Math.trunc(input.maxRounds ?? DEFAULT_ORCHESTRATOR_MAX_ROUNDS))),
+      maxRounds: Math.min(roundsLimit, Math.max(1, Math.trunc(input.maxRounds ?? defaultRounds))),
       subtasks: [],
+      ...(mode === 'pair' ? { pairRounds: [] } : {}),
       coordinatorProvider: orchestratorProvider,
       coordinatorSessionId: input.orchestratorSessionId,
     },
@@ -767,6 +1007,7 @@ export function startOrchestratorRun(
     plan: null,
     reports: [],
     coordinatorSessions: {},
+    ...(mode === 'pair' ? { pairWriterReports: [] } : {}),
   };
   runs.set(state.run.id, state);
   save(state);

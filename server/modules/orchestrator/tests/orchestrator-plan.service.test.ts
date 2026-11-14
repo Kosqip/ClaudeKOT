@@ -6,8 +6,11 @@ import {
   buildReviewPrompt,
   buildSubtaskPrompt,
   buildSubtaskTurnOptions,
+  findRepeatedPairFindings,
   groupSubtasksIntoSteps,
   parseOrchestratorReview,
+  parsePairReview,
+  parsePairWriterDone,
   parseOrchestratorPlan,
   resolveSubtaskProvider,
 } from '@/modules/orchestrator/services/orchestrator-plan.service.js';
@@ -184,4 +187,28 @@ test('a plan whose description contains its own code fence is still read whole',
 
   // Prose around an unfenced object is tolerated too.
   assert.deepEqual(parseOrchestratorReview('Here you go: {"status": "done", "summary": "ok"} — bye'), { status: 'done', summary: 'ok' });
+});
+
+test('parsePairReview reads approvals and findings, normalising the severity', () => {
+  assert.deepEqual(parsePairReview('```json\n{"status":"approved"}\n```'), { status: 'approved', findings: [] });
+  assert.deepEqual(
+    parsePairReview('{"status":"changes","findings":[{"severity":"p1","text":" Missing test "}]}'),
+    { status: 'changes', findings: [{ severity: 'P1', text: 'Missing test' }] },
+  );
+  assert.throws(() => parsePairReview('{"status":"ok"}'), /"approved" or "changes"/);
+  assert.throws(() => parsePairReview('{"status":"changes","findings":[{"severity":"P9","text":"x"}]}'), /severity/);
+});
+
+test('parsePairWriterDone takes the last WRITER_STATUS line and treats a missing one as not done', () => {
+  assert.equal(parsePairWriterDone('Did it.\nWRITER_STATUS: done'), true);
+  assert.equal(parsePairWriterDone('WRITER_STATUS: done\nthen more work\nWRITER_STATUS: not_done'), false);
+  assert.equal(parsePairWriterDone('Did it.'), false);
+});
+
+test('findRepeatedPairFindings matches open findings by text only, ignoring P2 and approvals', () => {
+  const previous = { verdict: 'changes' as const, findings: [{ severity: 'P1' as const, text: 'No input check.' }, { severity: 'P2' as const, text: 'Naming' }] };
+  assert.equal(findRepeatedPairFindings(previous, { verdict: 'changes', findings: [{ severity: 'P0', text: 'no input check' }] }).length, 1);
+  assert.equal(findRepeatedPairFindings(previous, { verdict: 'changes', findings: [{ severity: 'P2', text: 'No input check.' }] }).length, 0);
+  assert.equal(findRepeatedPairFindings(previous, { verdict: 'changes', findings: [{ severity: 'P1', text: 'Naming' }] }).length, 0);
+  assert.equal(findRepeatedPairFindings(previous, { verdict: 'approved', findings: [] }).length, 0);
 });

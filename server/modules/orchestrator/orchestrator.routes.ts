@@ -9,11 +9,12 @@ import {
   findLatestOrchestratorRun,
   getOrchestratorRun,
   ORCHESTRATOR_MAX_ROUNDS_LIMIT,
+  PAIR_MAX_ROUNDS_LIMIT,
   resumeOrchestratorRun,
   startOrchestratorRun,
 } from '@/modules/orchestrator/services/orchestrator-dispatch.service.js';
 import { providerRuntimeService } from '@/modules/providers/index.js';
-import type { LLMProvider, ProviderRole } from '@/shared/types.js';
+import type { LLMProvider, OrchestratorRunMode, ProviderRole } from '@/shared/types.js';
 import { AppError, asyncHandler, createApiSuccessResponse } from '@/shared/utils.js';
 
 type AuthenticatedRequest = Request & { user?: { id?: number | string } };
@@ -62,12 +63,21 @@ function readTask(value: unknown): string {
   return value;
 }
 
-function readMaxRounds(value: unknown): number | undefined {
+function readMode(value: unknown): OrchestratorRunMode {
+  if (value === undefined || value === 'plan' || value === 'pair') {
+    return value ?? 'plan';
+  }
+  throw new AppError('mode must be "plan" or "pair".', { code: 'INVALID_REQUEST_BODY', statusCode: 400 });
+}
+
+/** A pair run allows more rounds than a plan run: each of its rounds is only two turns. */
+function readMaxRounds(value: unknown, mode: OrchestratorRunMode): number | undefined {
   if (value === undefined) {
     return undefined;
   }
-  if (typeof value !== 'number' || !Number.isInteger(value) || value < 1 || value > ORCHESTRATOR_MAX_ROUNDS_LIMIT) {
-    throw new AppError(`maxRounds must be a whole number from 1 to ${ORCHESTRATOR_MAX_ROUNDS_LIMIT}.`, {
+  const limit = mode === 'pair' ? PAIR_MAX_ROUNDS_LIMIT : ORCHESTRATOR_MAX_ROUNDS_LIMIT;
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 1 || value > limit) {
+    throw new AppError(`maxRounds must be a whole number from 1 to ${limit}.`, {
       code: 'INVALID_REQUEST_BODY',
       statusCode: 400,
     });
@@ -101,6 +111,7 @@ router.post(
     }
 
     const userId = readUserId(req);
+    const mode = readMode(body.mode);
     const { run, finished } = startOrchestratorRun(
       {
         orchestratorSessionId: body.sessionId,
@@ -108,7 +119,8 @@ router.post(
         task: readTask(body.task),
         providerRoles: readStoredProviderRoles(userId),
         preferredOrder: readStoredFallbackOrder(userId),
-        maxRounds: readMaxRounds(body.maxRounds),
+        maxRounds: readMaxRounds(body.maxRounds, mode),
+        mode,
       },
       createOrchestratorRunDependencies(providerRuntimeService),
     );

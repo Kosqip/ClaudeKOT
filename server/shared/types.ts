@@ -1984,7 +1984,8 @@ export type OrchestratorSubtaskStatus = 'pending' | 'running' | 'done' | 'failed
  */
 export type OrchestratorSubtaskResult = {
   title: string;
-  role: 'hands' | 'routine';
+  /** The role whose chain the work went to; `orchestrator` only for a pair run's reviewer turn. */
+  role: ProviderRole;
   access: OrchestratorSubtaskAccess;
   round: number;
   status: OrchestratorSubtaskStatus;
@@ -1992,6 +1993,41 @@ export type OrchestratorSubtaskResult = {
   sessionId?: string;
   error?: string;
   movedFrom?: LLMProvider[];
+  /** Set only in a pair run: whether this turn was the writer's or the reviewer's. */
+  pairPart?: 'writer' | 'reviewer';
+};
+
+/**
+ * How a run works. `plan`: the orchestrator splits the task into subtasks
+ * and reviews their reports round by round. `pair`: one writer (the `hands`
+ * chain, full access) and one reviewer (another backend, the `orchestrator`
+ * chain first, read-only) take turns until the writer says it is done and the
+ * reviewer has no open P0/P1 finding. A run saved without `mode` is `plan`.
+ */
+export type OrchestratorRunMode = 'plan' | 'pair';
+
+/** How serious a reviewer's finding is: `P0`/`P1` must be fixed before a pair run can close, `P2` is advice. */
+export type OrchestratorFindingSeverity = 'P0' | 'P1' | 'P2';
+
+/** One finding of a pair run's reviewer, exactly as it came in its JSON verdict. */
+export type OrchestratorReviewFinding = {
+  severity: OrchestratorFindingSeverity;
+  text: string;
+};
+
+/**
+ * One round of a pair run as the UI shows it. `writerDone` is unset until the
+ * writer's turn ends, then says whether the writer called the task finished;
+ * `verdict` is unset until the reviewer has answered. `userContinued` marks a
+ * round the user let go on after the run paused on a finding that came back
+ * twice in a row, so that pause is not raised again for it.
+ */
+export type OrchestratorPairRound = {
+  round: number;
+  writerDone?: boolean;
+  verdict?: 'approved' | 'changes';
+  findings: OrchestratorReviewFinding[];
+  userContinued?: boolean;
 };
 
 /**
@@ -2026,7 +2062,14 @@ export type OrchestratorRun = {
   subtasks: OrchestratorSubtaskResult[];
   coordinatorProvider?: LLMProvider;
   coordinatorSessionId?: string;
-  pauseReason?: 'limit' | 'restart';
+  /** `decision`: a pair run whose reviewer raised the same P0/P1 finding two rounds in a row — it waits for the user. */
+  pauseReason?: 'limit' | 'restart' | 'decision';
+  /** Unset means `plan` (runs saved before pair mode existed). */
+  mode?: OrchestratorRunMode;
+  /** A pair run's rounds, oldest first. */
+  pairRounds?: OrchestratorPairRound[];
+  /** How a finished pair run ended: the reviewer approved finished work, or the rounds ran out with findings still open. */
+  pairOutcome?: 'approved' | 'rounds';
   /** The backend the task waits for while paused on a limit. */
   waitingFor?: LLMProvider;
   /** When a limit pause ends by itself (ISO). */

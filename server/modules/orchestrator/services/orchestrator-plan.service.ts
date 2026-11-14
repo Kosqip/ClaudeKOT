@@ -1,4 +1,11 @@
-import type { LLMProvider, OrchestratorSubtask, OrchestratorSubtaskAccess, ProviderRole } from '@/shared/types.js';
+import type {
+  LLMProvider,
+  OrchestratorFindingSeverity,
+  OrchestratorReviewFinding,
+  OrchestratorSubtask,
+  OrchestratorSubtaskAccess,
+  ProviderRole,
+} from '@/shared/types.js';
 import { AppError, isTextOnlyProvider } from '@/shared/utils.js';
 
 // isTextOnlyProvider re-exported for this module's existing consumers
@@ -279,6 +286,195 @@ export function parseOrchestratorReview(responseText: string): OrchestratorRevie
     `The orchestrator's review had no "status" of "done" or "continue". Raw response:\n\n${responseText}`,
     { code: 'ORCHESTRATOR_PLAN_PARSE_FAILED', statusCode: 502 },
   );
+}
+
+// ---------------------------
+// Pair mode: one writer and one read-only reviewer take turns on the whole task.
+
+/** The line a pair run's writer ends its reply with; `parsePairWriterDone` looks for it. */
+const WRITER_STATUS_LINE = /WRITER_STATUS:\s*(done|not_done)\b/gi;
+
+const PAIR_REVIEW_SHAPE = '{"status": "approved"}  or  {"status": "changes", "findings": [{"severity": "P0", "text": "what is wrong, where, and what to do"}]}';
+
+const PAIR_SEVERITY_RULES = [
+  'Severity:',
+  '- "P0": broken, wrong or unsafe — the work must not ship like this',
+  '- "P1": a real defect or a requirement of the task that is missing',
+  '- "P2": a minor improvement; optional',
+];
+
+function renderFindings(findings: OrchestratorReviewFinding[]): string {
+  return findings.map((finding) => `- [${finding.severity}] ${finding.text}`).join('\n');
+}
+
+function cutReport(report: string): string {
+  return report.length > MAX_REPORTED_RESULT_CHARS ? `${report.slice(0, MAX_REPORTED_RESULT_CHARS)}\n[…cut]` : report;
+}
+
+/**
+ * The message of a pair run's writer turn. The first round gets the task
+ * alone; later ones also get the reviewer's findings from the round before
+ * (P0/P1 to fix, P2 optional) and the writer's own previous report, since
+ * every round starts in a new session. `userContinued` says the user saw a
+ * finding come back twice and asked for another round anyway. The writer is
+ * asked to end with a `WRITER_STATUS` line (`parsePairWriterDone`).
+ */
+export function buildPairWriterPrompt(input: {
+  task: string;
+  round: number;
+  previousFindings: OrchestratorReviewFinding[];
+  previousReport: string | null;
+  userContinued: boolean;
+  takenOver: boolean;
+}): string {
+  const mustFix = input.previousFindings.filter((finding) => finding.severity !== 'P2');
+  const optional = input.previousFindings.filter((finding) => finding.severity === 'P2');
+  return [
+    'You are the writer in a writer–reviewer pair. You do the work in the project folder; another AI backend reviews it after each of your turns, read-only, and its findings come back to you.',
+    '',
+    `Task:\n${input.task}`,
+    ...(input.round > 1 && input.previousReport
+      ? ['', `Your report from the previous round (round ${input.round - 1}):`, cutReport(input.previousReport)]
+      : []),
+    ...(mustFix.length > 0 ? ['', 'The reviewer found these problems. Fix every one of them:', renderFindings(mustFix)] : []),
+    ...(optional.length > 0 ? ['', 'Minor suggestions from the reviewer (optional):', renderFindings(optional)] : []),
+    ...(input.round > 1 && input.previousFindings.length === 0
+      ? ['', 'The reviewer had no findings on your previous round, but you said the work was not finished. Continue it.']
+      : []),
+    ...(input.userContinued
+      ? ['', 'The same finding came back two rounds in a row, and the user asked for another round. Either fix it in a different way or explain clearly in your report why it should stay as it is.']
+      : []),
+    ...(input.takenOver
+      ? ['', 'Another backend already started this round and was cut off before finishing, so some of it may be half-done. Check the actual state of the project folder first (for example `git status` and `git diff`) and continue from there.']
+      : []),
+    '',
+    'End your reply with a short report of what you did, and then, on its own last line, exactly one of:',
+    'WRITER_STATUS: done      — the task is complete as far as you can tell',
+    'WRITER_STATUS: not_done  — work remains',
+  ].join('\n');
+}
+
+/**
+ * Whether a pair writer's reply says the work is finished: the last
+ * `WRITER_STATUS` line wins. A reply without one counts as not finished —
+ * a pair run closes only on the writer's explicit word.
+ */
+export function parsePairWriterDone(reply: string): boolean {
+  const matches = [...reply.matchAll(WRITER_STATUS_LINE)];
+  return matches.length > 0 && matches[matches.length - 1][1].toLowerCase() === 'done';
+}
+
+/** The writer's report without its `WRITER_STATUS` line, as shown to the reviewer and the user. */
+export function stripPairWriterStatus(reply: string): string {
+  return reply.replace(WRITER_STATUS_LINE, '').trim();
+}
+
+/**
+ * The message of a pair run's reviewer turn: the task, the writer's report,
+ * the plain statement that it must not change anything (its turn is also
+ * started with editing withheld — `buildSubtaskTurnOptions(provider, 'read')`),
+ * and the JSON verdict it must answer with (`parsePairReview`).
+ */
+export function buildPairReviewPrompt(input: {
+  task: string;
+  round: number;
+  writerReport: string;
+  previousFindings: OrchestratorReviewFinding[];
+}): string {
+  return [
+    'You are the reviewer in a writer–reviewer pair. Another AI backend (the writer) works on the task below in this project folder; you check its work.',
+    'This is a read-only review: do not create, edit or delete any files and do not run commands that change anything.',
+    '',
+    `Task:\n${input.task}`,
+    '',
+    `The writer's report for round ${input.round}:`,
+    cutReport(input.writerReport) || '(no report)',
+    ...(input.previousFindings.length > 0
+      ? ['', 'Your findings from the previous round, which the writer was asked to fix:', renderFindings(input.previousFindings)]
+      : []),
+    '',
+    'Check the actual project folder (for example `git diff` and the files themselves), not only the report. Report only real problems against the task.',
+    ...PAIR_SEVERITY_RULES,
+    '',
+    'Respond with ONLY a single fenced JSON code block and nothing else, in one of these shapes:',
+    '```json',
+    PAIR_REVIEW_SHAPE,
+    '```',
+  ].join('\n');
+}
+
+/** The one follow-up a pair reviewer gets when its verdict could not be read: names the problem and repeats the shape. */
+export function buildPairReviewRetryPrompt(problem: string): string {
+  return [
+    `Your last reply could not be used: ${problem}`,
+    'Reply again with ONLY a single fenced JSON code block and nothing else, in exactly this shape:',
+    '```json',
+    PAIR_REVIEW_SHAPE,
+    '```',
+  ].join('\n');
+}
+
+/** A pair reviewer's verdict on one round. */
+export type PairReview = { status: 'approved' | 'changes'; findings: OrchestratorReviewFinding[] };
+
+const FINDING_SEVERITIES: OrchestratorFindingSeverity[] = ['P0', 'P1', 'P2'];
+
+/**
+ * Parses a pair reviewer's JSON verdict. `approved` may come without
+ * findings; `changes` carries a list of `{severity, text}`. Throws
+ * `AppError` with the raw reply on any other shape, like
+ * `parseOrchestratorPlan` — the caller asks once more.
+ */
+export function parsePairReview(responseText: string): PairReview {
+  const parsed = parseJsonReply(responseText) as Record<string, unknown> | null;
+  if (parsed?.status !== 'approved' && parsed?.status !== 'changes') {
+    throw new AppError(
+      `The review had no "status" of "approved" or "changes". Raw response:\n\n${responseText}`,
+      { code: 'ORCHESTRATOR_PLAN_PARSE_FAILED', statusCode: 502 },
+    );
+  }
+  const findingsRaw = parsed.findings ?? [];
+  if (!Array.isArray(findingsRaw)) {
+    throw new AppError(`The review's "findings" is not a list. Raw response:\n\n${responseText}`, {
+      code: 'ORCHESTRATOR_PLAN_PARSE_FAILED',
+      statusCode: 502,
+    });
+  }
+  const findings = findingsRaw.map((entry, index): OrchestratorReviewFinding => {
+    const record = entry as Record<string, unknown>;
+    const severity = typeof record?.severity === 'string' ? record.severity.toUpperCase() : '';
+    if (!(FINDING_SEVERITIES as string[]).includes(severity) || typeof record?.text !== 'string' || !record.text.trim()) {
+      throw new AppError(
+        `Finding ${index} is missing a valid "severity" ("P0"/"P1"/"P2") or "text". Raw response:\n\n${responseText}`,
+        { code: 'ORCHESTRATOR_PLAN_PARSE_FAILED', statusCode: 502 },
+      );
+    }
+    return { severity: severity as OrchestratorFindingSeverity, text: record.text.trim() };
+  });
+  return { status: parsed.status, findings };
+}
+
+/** The findings that keep a pair run open: P0 and P1 of a `changes` verdict. An approval leaves nothing open. */
+export function listOpenPairFindings(review: { verdict?: 'approved' | 'changes'; findings: OrchestratorReviewFinding[] }): OrchestratorReviewFinding[] {
+  return review.verdict === 'changes' ? review.findings.filter((finding) => finding.severity !== 'P2') : [];
+}
+
+function normalizeFindingText(text: string): string {
+  return text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+}
+
+/**
+ * The open (P0/P1) findings of `current` that were also open in `previous`,
+ * compared by their text with case, punctuation and spacing ignored — a
+ * severity that moved between P0 and P1 is still the same finding. Two
+ * rounds in a row with one of these means the pair is stuck on it.
+ */
+export function findRepeatedPairFindings(
+  previous: { verdict?: 'approved' | 'changes'; findings: OrchestratorReviewFinding[] },
+  current: { verdict?: 'approved' | 'changes'; findings: OrchestratorReviewFinding[] },
+): OrchestratorReviewFinding[] {
+  const earlier = new Set(listOpenPairFindings(previous).map((finding) => normalizeFindingText(finding.text)));
+  return listOpenPairFindings(current).filter((finding) => earlier.has(normalizeFindingText(finding.text)));
 }
 
 /**

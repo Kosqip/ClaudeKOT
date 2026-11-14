@@ -549,13 +549,37 @@
       },
       "roles": {
         "hands": "hands",
-        "routine": "routine"
+        "routine": "routine",
+        "orchestrator": "orchestrator"
       },
       "resume": "Continue now",
       "pausedLimit": "Every backend that could take the next step is at its usage limit. The task goes on by itself when {{provider}}'s limit resets — around {{time}}.",
       "pausedRestart": "The server was restarted in the middle of the task. Finished parts are kept — press \"Continue now\" and only the rest is done.",
       "coordinatorMoved": "{{provider}} now leads the task: the previous orchestrator ran out of usage.",
-      "movedFrom": "taken over from {{providers}} after its limit"
+      "movedFrom": "taken over from {{providers}} after its limit",
+      "mode": "Mode",
+      "modes": {
+        "plan": "Plan",
+        "pair": "Pair (writer + reviewer)"
+      },
+      "pairDescription": "A writer (the \"hands\" backend, can edit) does the task; another backend reviews each round read-only and lists findings. The writer fixes P0/P1 findings until it says the work is done and nothing serious is open.",
+      "pairPhase": {
+        "running": "The writer is working (round {{round}} of {{maxRounds}})",
+        "reviewing": "The reviewer is checking (round {{round}} of {{maxRounds}})"
+      },
+      "pair": {
+        "writer": "writer",
+        "reviewer": "reviewer",
+        "writerDone": "writer: done",
+        "writerNotDone": "writer: not finished",
+        "approved": "approved",
+        "changes": "changes requested",
+        "noFindings": "no findings",
+        "continued": "continued by you",
+        "outcomeApproved": "The reviewer approved the finished work.",
+        "outcomeRounds": "The rounds ran out with findings still open — see the last round."
+      },
+      "pausedDecision": "The reviewer raised the same serious finding two rounds in a row. Your decision is needed: press \"Continue now\" for another round (the writer is told to fix it differently or explain why it stays), or \"Stop\"."
     },
     "switchBackend": {
       "label": "Switch backend",

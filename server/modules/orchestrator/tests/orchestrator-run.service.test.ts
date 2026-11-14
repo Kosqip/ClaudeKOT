@@ -16,6 +16,7 @@ import {
   startOrchestratorRun,
 } from '@/modules/orchestrator/services/orchestrator-dispatch.service.js';
 import type { OrchestratorRunDependencies } from '@/modules/orchestrator/services/orchestrator-dispatch.service.js';
+import { buildSubtaskTurnOptions } from '@/modules/orchestrator/services/orchestrator-plan.service.js';
 
 type Turn = { sessionId: string; provider: string; content: string; options?: Record<string, unknown> };
 
@@ -388,5 +389,167 @@ test('file work is not handed to a text model that only stands in for the role',
       return null;
     }
     return 'built';
+  });
+});
+
+// ---------------------------
+// Pair mode: a writer (hands, full access) and a read-only reviewer (another backend).
+
+const startPair = (dependencies: OrchestratorRunDependencies, maxRounds?: number) => startOrchestratorRun(
+  { orchestratorSessionId: 'lead', userId: 1, task: 'Ship the feature', providerRoles: ROLES, maxRounds, mode: 'pair' },
+  dependencies,
+);
+const isReview = (turn: Turn) => /You are the reviewer/.test(turn.content);
+const writerTurns = (turns: Turn[]) => turns.filter((turn) => turn.sessionId !== 'lead' && !isReview(turn));
+const reviewTurns = (turns: Turn[]) => turns.filter(isReview);
+const APPROVED = json({ status: 'approved' });
+const changes = (...findings: Array<[string, string]>) => json({ status: 'changes', findings: findings.map(([severity, text]) => ({ severity, text })) });
+
+/** Scripts the pair: the writer's replies and the reviewer's verdicts, one per turn, in order. */
+function pairScript(writer: string[], reviewer: string[]) {
+  return (turn: Turn) => (isReview(turn) ? reviewer.shift() ?? null : writer.shift() ?? null);
+}
+
+test('pair: the reviewer approves the first round and the run closes', async () => {
+  await withOrchestrator([], async ({ turns, dependencies }) => {
+    const { run, finished } = startPair(dependencies);
+    assert.equal(run.mode, 'pair');
+    assert.equal(run.maxRounds, 3);
+    await finished;
+
+    const final = getOrchestratorRun(run.id)!;
+    assert.equal(final.phase, 'done');
+    assert.equal(final.pairOutcome, 'approved');
+    assert.equal(final.summary, 'Built it.');
+    assert.deepEqual(final.pairRounds, [{ round: 1, writerDone: true, verdict: 'approved', findings: [] }]);
+    assert.deepEqual(final.subtasks.map((subtask) => [subtask.pairPart, subtask.provider, subtask.access, subtask.status]), [
+      ['writer', 'codex', 'write', 'done'],
+      ['reviewer', 'claude', 'read', 'done'],
+    ]);
+    // No plan is asked for in pair mode.
+    assert.equal(turns.filter((turn) => turn.sessionId === 'lead').length, 0);
+    assert.match(reviewTurns(turns)[0].content, /Built it\./);
+  }, pairScript(['Built it.\nWRITER_STATUS: done'], [APPROVED]));
+});
+
+test('pair: the writer fixes the reviewer\'s P0/P1 findings and the next round is approved', async () => {
+  await withOrchestrator([], async ({ turns, dependencies }) => {
+    const { run, finished } = startPair(dependencies);
+    await finished;
+
+    const final = getOrchestratorRun(run.id)!;
+    assert.equal(final.phase, 'done');
+    assert.equal(final.pairOutcome, 'approved');
+    assert.equal(final.round, 2);
+    assert.deepEqual(final.pairRounds!.map((round) => round.verdict), ['changes', 'approved']);
+    const [, second] = writerTurns(turns);
+    assert.match(second.content, /Fix every one of them:\n- \[P1\] The test for empty input is missing/);
+    assert.match(second.content, /optional\):\n- \[P2\] Rename the helper/);
+    assert.match(second.content, /First try\./);
+    // The second review is told what it asked for last time.
+    assert.match(reviewTurns(turns)[1].content, /previous round.*\n- \[P1\] The test for empty input is missing/);
+  }, pairScript(
+    ['First try.\nWRITER_STATUS: done', 'Added the test.\nWRITER_STATUS: done'],
+    [changes(['P1', 'The test for empty input is missing'], ['P2', 'Rename the helper']), APPROVED],
+  ));
+});
+
+test('pair: only P2 findings do not hold back a finished writer', async () => {
+  await withOrchestrator([], async ({ dependencies }) => {
+    const { run, finished } = startPair(dependencies);
+    await finished;
+    const final = getOrchestratorRun(run.id)!;
+    assert.equal(final.pairOutcome, 'approved');
+    assert.equal(final.round, 1);
+  }, pairScript(['Done.\nWRITER_STATUS: done'], [changes(['P2', 'A comment would help'])]));
+});
+
+test('pair: when the rounds run out with findings open the run ends without approval', async () => {
+  await withOrchestrator([], async ({ turns, dependencies }) => {
+    const { run, finished } = startPair(dependencies, 2);
+    await finished;
+
+    const final = getOrchestratorRun(run.id)!;
+    assert.equal(final.phase, 'done');
+    assert.equal(final.pairOutcome, 'rounds');
+    assert.equal(final.round, 2);
+    assert.equal(writerTurns(turns).length, 2);
+    assert.deepEqual(final.pairRounds![1].findings, [{ severity: 'P0', text: 'The build is broken' }]);
+  }, pairScript(
+    ['Try one.\nWRITER_STATUS: done', 'Try two.\nWRITER_STATUS: done'],
+    [changes(['P1', 'Input is not validated']), changes(['P0', 'The build is broken'])],
+  ));
+});
+
+test('pair: a writer that has not said it is done keeps the run going even when approved', async () => {
+  await withOrchestrator([], async ({ turns, dependencies }) => {
+    const { run, finished } = startPair(dependencies);
+    await finished;
+    const final = getOrchestratorRun(run.id)!;
+    assert.equal(final.pairOutcome, 'approved');
+    assert.equal(final.round, 2);
+    assert.match(writerTurns(turns)[1].content, /said the work was not finished/);
+  }, pairScript(['Half of it.\nWRITER_STATUS: not_done', 'The rest.\nWRITER_STATUS: done'], [APPROVED, APPROVED]));
+});
+
+test('pair: the same P0/P1 finding two rounds in a row pauses for the user, who can let it go on', async () => {
+  await withOrchestrator([], async ({ turns, dependencies }) => {
+    const { run, finished } = startPair(dependencies, 5);
+    await finished;
+
+    const paused = getOrchestratorRun(run.id)!;
+    assert.equal(paused.phase, 'paused');
+    assert.equal(paused.pauseReason, 'decision');
+    assert.equal(paused.round, 2);
+    assert.equal(writerTurns(turns).length, 2);
+
+    // The decision pause survives a restart as it is.
+    forgetOrchestratorRunsInMemory();
+    assert.equal(getOrchestratorRun(run.id)!.pauseReason, 'decision');
+
+    await resumeOrchestratorRun(run.id, dependencies)!.finished;
+    const final = getOrchestratorRun(run.id)!;
+    assert.equal(final.phase, 'done');
+    assert.equal(final.pairOutcome, 'approved');
+    assert.equal(final.round, 3);
+    assert.equal(final.pairRounds![2].userContinued, true);
+    assert.match(writerTurns(turns)[2].content, /came back two rounds in a row/);
+  }, pairScript(
+    ['One.\nWRITER_STATUS: done', 'Two.\nWRITER_STATUS: done', 'Three.\nWRITER_STATUS: done'],
+    // Same finding, different case and punctuation: still the same one.
+    [changes(['P1', 'Errors are swallowed in save().']), changes(['P0', 'errors are swallowed in save()']), APPROVED],
+  ));
+});
+
+test('pair: the reviewer is another backend, started read-only', async () => {
+  await withOrchestrator([], async ({ turns, dependencies }) => {
+    const { finished } = startPair(dependencies);
+    await finished;
+
+    const [writer] = writerTurns(turns);
+    const [review] = reviewTurns(turns);
+    assert.equal(writer.provider, 'codex');
+    assert.deepEqual(writer.options, buildSubtaskTurnOptions('codex', 'write'));
+    assert.equal(review.provider, 'claude');
+    assert.deepEqual(review.options, buildSubtaskTurnOptions('claude', 'read'));
+    assert.match(review.content, /read-only review: do not create, edit or delete any files/);
+  }, pairScript(['Built.\nWRITER_STATUS: done'], [APPROVED]));
+});
+
+test('pair: an unreadable verdict is asked for once more in the reviewer\'s own session', async () => {
+  await withOrchestrator([], async ({ turns, dependencies }) => {
+    const { run, finished } = startPair(dependencies);
+    await finished;
+    assert.equal(getOrchestratorRun(run.id)!.pairOutcome, 'approved');
+    const reviewerSession = getOrchestratorRun(run.id)!.subtasks[1].sessionId;
+    const retry = turns.filter((turn) => turn.sessionId === reviewerSession);
+    assert.equal(retry.length, 2);
+    assert.match(retry[1].content, /could not be used/);
+    assert.deepEqual(retry[1].options, buildSubtaskTurnOptions('claude', 'read'));
+  }, (turn) => {
+    if (/could not be used/.test(turn.content)) {
+      return APPROVED;
+    }
+    return isReview(turn) ? 'Looks good to me!' : 'Built.\nWRITER_STATUS: done';
   });
 });
