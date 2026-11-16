@@ -8,15 +8,18 @@ export { handoffSessionOnLimit } from '@/modules/handoff/services/limit-handoff.
 // gets one automatic handoff however many times its limit is reported.
 export { releaseHandoffClaim, tryClaimHandoff } from '@/modules/handoff/services/limit-handoff.service.js';
 
-// shouldHandoffForRateLimitStatus / DEFAULT_HANDOFF_THRESHOLD_PERCENT: used
-// by server/index.ts to decide, from a live rate_limit_status message and
-// the user's configured threshold preference, whether to call
-// handoffSessionOnLimit proactively (before Claude actually rejects a
-// request) or only on a hard rejection.
-export {
-  DEFAULT_HANDOFF_THRESHOLD_PERCENT,
-  shouldHandoffForRateLimitStatus,
-} from '@/modules/handoff/services/limit-handoff.service.js';
+// shouldHandoffForRateLimitStatus: used by server/index.ts to decide, from a
+// live rate_limit_status message and the user's configured threshold
+// (readHandoffThresholdPercent below), whether to call handoffSessionOnLimit
+// proactively (before Claude actually rejects a request) or only on a hard
+// rejection.
+export { shouldHandoffForRateLimitStatus } from '@/modules/handoff/services/limit-handoff.service.js';
+
+// readHandoffThresholdPercent: one user's threshold, for server/index.ts and
+// the orchestrator. isProviderOverUsageThreshold: lets the orchestrator
+// prefer the next backend of a role's chain over one whose last reported
+// usage is at or above that threshold.
+export { isProviderOverUsageThreshold, readHandoffThresholdPercent } from '@/modules/handoff/services/limit-handoff.service.js';
 
 // decideHandoffForRunFailure: used by server/index.ts to tell a limit
 // (relay to a fallback) from a failure no backend can fix (fail fast: no

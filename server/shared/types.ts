@@ -1872,21 +1872,36 @@ export type ProviderLimitReason =
   | 'unknown_limit';
 
 /**
- * Result of inspecting one provider's raw error/event for a subscription or
- * rate limit, as opposed to an ordinary failure (bad auth, network error,
- * programming bug). `detected: false` means "not recognized as a limit" —
- * never inferred from a generic catch-all, since a false positive would send
- * the handoff module hunting for a replacement backend on an unrelated error.
+ * What one provider's turn signal (a failed turn's error text, Claude's
+ * structured `SDKAssistantMessageError` code, a rejected rate-limit window)
+ * means for the app — the single typed answer the detector
+ * (`classifyProviderTurnOutcome` in the providers module) gives and every
+ * consumer acts on, instead of each re-reading the signal its own way:
+ * - `limit` — a subscription/rate limit: pause or hand the work to another
+ *   backend (`reason` names the window, `resetsAt` when it is known);
+ * - `fatal` — no retry or other backend can fix it (`cause`, see
+ *   `ProviderFatalFailureCause`): fail fast and tell the user;
+ * - `transient` — a passing failure the provider itself reported as such
+ *   (overloaded, a 5xx, a dropped connection): a retry may succeed, but
+ *   nothing is moved;
+ * - `none` — not recognized as any of these; never guessed from a generic
+ *   catch-all, since a false `limit` would move a session over an
+ *   unrelated error.
+ * Consumers: the handoff decision (`decideHandoffForRunFailure`), the chat
+ * gateway (labels a `fatal` error for the UI and reports it in the turn's
+ * outcome, which the orchestrator reads) and the Claude runtime.
  */
-export type ProviderLimitDetectionResult =
-  | { detected: true; reason: ProviderLimitReason; resetsAt?: string }
-  | { detected: false; fatalCause?: ProviderFatalFailureCause };
+export type ProviderTurnOutcome =
+  | { kind: 'limit'; reason: ProviderLimitReason; resetsAt?: string }
+  | { kind: 'fatal'; cause: ProviderFatalFailureCause }
+  | { kind: 'transient' }
+  | { kind: 'none' };
 
 /**
  * A failure that neither a retry nor a move to another backend can fix
  * ("fail fast", after Audatic07/duo): the provider's CLI is not installed,
  * its sign-in is missing or expired, or the requested model does not exist.
- * Reported by `detectProviderLimit` as `fatalCause` on a non-limit result —
+ * Reported by `classifyProviderTurnOutcome` as a `fatal` outcome —
  * checked before any limit match, so an error that happens to mention a
  * limit is still not handed off. Consumers:
  * - the handoff decision in `server/modules/handoff/` refuses to start a

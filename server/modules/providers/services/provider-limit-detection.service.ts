@@ -1,7 +1,7 @@
 import type {
   LLMProvider,
   ProviderFatalFailureCause,
-  ProviderLimitDetectionResult,
+  ProviderTurnOutcome,
 } from '@/shared/types.js';
 
 /**
@@ -25,7 +25,7 @@ const CLAUDE_RATE_LIMIT_TYPE_TO_REASON: Partial<Record<string, 'five_hour' | 'se
  *
  * Exported for the handoff module's proactive threshold path, which decides
  * to hand off from a live `rate_limit_status` message's `utilization`
- * before the window is actually exhausted — `detectProviderLimit` below only
+ * before the window is actually exhausted — `classifyProviderTurnOutcome` below only
  * ever fires on `status: 'rejected'`, so a proactive handoff needs this
  * mapping directly rather than going through it.
  */
@@ -153,8 +153,41 @@ function detectFatalFailure(
 }
 
 /**
- * Detects whether one provider's raw runtime error/event represents a
- * subscription or API rate limit rather than an ordinary failure.
+ * Claude's `SDKAssistantMessageError` codes for a passing server-side
+ * failure: the request may well go through if sent again.
+ */
+const CLAUDE_TRANSIENT_SDK_ERRORS: ReadonlySet<string> = new Set(['overloaded', 'server_error']);
+
+/**
+ * Node's own codes for a dropped or timed-out connection, which any
+ * provider's runtime can surface verbatim — never a model's wording.
+ */
+const NETWORK_TRANSIENT_TEXT_PATTERN = /\b(?:ECONNRESET|ETIMEDOUT|ECONNREFUSED|EAI_AGAIN|socket hang up)\b/;
+
+/**
+ * A passing failure, read from structured fields (Claude's code,
+ * OpenRouter's 5xx/408 status) or Node's own network error codes.
+ */
+function isTransientFailure(provider: LLMProvider, signal: { claudeSdkError?: string; message?: string }): boolean {
+  if (provider === 'claude' && signal.claudeSdkError && CLAUDE_TRANSIENT_SDK_ERRORS.has(signal.claudeSdkError)) {
+    return true;
+  }
+  const message = signal.message ?? '';
+  if (provider === 'openrouter') {
+    const status = Number(message.match(/\b(?:openrouter|anthropic|openai) request failed \((\d+)\)/i)?.[1]);
+    if (status === 408 || (status >= 500 && status <= 599)) {
+      return true;
+    }
+  }
+  return NETWORK_TRANSIENT_TEXT_PATTERN.test(message);
+}
+
+/**
+ * Classifies one provider's raw runtime error/event as a `ProviderTurnOutcome`:
+ * a subscription/API limit, a failure no backend can fix, a passing failure,
+ * or none of these. Checked in that order of trust: fatal first (an error
+ * that also mentions a limit is still not handed off), then limit, then
+ * transient.
  *
  * Used by the handoff module (`server/modules/handoff/`) to decide whether a
  * failed turn should trigger an automatic switch to a fallback backend, by
@@ -165,7 +198,7 @@ function detectFatalFailure(
  * that changes the shape is easy to track down — see the comments on each
  * branch below rather than guessing from behavior.
  */
-export function detectProviderLimit(
+export function classifyProviderTurnOutcome(
   provider: LLMProvider,
   signal: {
     /** The `error` field of a Claude `SDKAssistantMessage`/`SDKResultMessage` (`SDKAssistantMessageError`), when present. */
@@ -175,15 +208,16 @@ export function detectProviderLimit(
     /** The plain-text error message surfaced by the runtime (Codex `ThreadError.message`, OpenRouter's thrown error text, or any provider's generic error content). */
     message?: string;
   },
-): ProviderLimitDetectionResult {
+): ProviderTurnOutcome {
   // Fail fast: a missing CLI, a missing/expired sign-in or an unknown model
   // is reported as such even when the text also mentions a limit — moving
   // the session would only spend another backend's limit on a turn that
   // cannot succeed anywhere until the user fixes the setup.
   const fatalCause = detectFatalFailure(provider, signal);
   if (fatalCause) {
-    return { detected: false, fatalCause };
+    return { kind: 'fatal', cause: fatalCause };
   }
+  const notALimit: ProviderTurnOutcome = isTransientFailure(provider, signal) ? { kind: 'transient' } : { kind: 'none' };
 
   if (provider === 'claude') {
     // A rejected rate-limit window is the authoritative signal: it names
@@ -193,7 +227,7 @@ export function detectProviderLimit(
         ? CLAUDE_RATE_LIMIT_TYPE_TO_REASON[signal.claudeRateLimitInfo.rateLimitType]
         : undefined;
       return {
-        detected: true,
+        kind: 'limit',
         reason: reason ?? 'rate_limit',
         resetsAt: signal.claudeRateLimitInfo.resetsAt
           ? new Date(signal.claudeRateLimitInfo.resetsAt).toISOString()
@@ -203,16 +237,16 @@ export function detectProviderLimit(
     // The assistant-message error literal 'rate_limit' is set on the SDK's
     // `SDKAssistantMessageError` union without a window breakdown.
     if (signal.claudeSdkError === 'rate_limit') {
-      return { detected: true, reason: 'rate_limit' };
+      return { kind: 'limit', reason: 'rate_limit' };
     }
-    return { detected: false };
+    return notALimit;
   }
 
   if (provider === 'codex') {
     if (signal.message && CODEX_RATE_LIMIT_TEXT_PATTERNS.some((pattern) => pattern.test(signal.message!))) {
-      return { detected: true, reason: 'unknown_limit' };
+      return { kind: 'limit', reason: 'unknown_limit' };
     }
-    return { detected: false };
+    return notALimit;
   }
 
   if (provider === 'openrouter') {
@@ -222,23 +256,23 @@ export function detectProviderLimit(
     // parentheses — no need to guess from the response body's wording.
     const statusMatch = signal.message?.match(/\b(?:openrouter|anthropic|openai) request failed \((\d+)\)/i);
     if (statusMatch && statusMatch[1] === '429') {
-      return { detected: true, reason: 'rate_limit' };
+      return { kind: 'limit', reason: 'rate_limit' };
     }
     // 402 is "out of credits" (OpenRouter's documented status for a spent
     // balance): the key works but nothing more will be served until it is
     // topped up, which for the conversation is the same as a spent limit.
     if (statusMatch && statusMatch[1] === '402') {
-      return { detected: true, reason: 'unknown_limit' };
+      return { kind: 'limit', reason: 'unknown_limit' };
     }
-    return { detected: false };
+    return notALimit;
   }
 
   // Cursor and OpenCode: no known structured or text signal was found in
   // their runtime adapters for a usage/rate limit specifically (as opposed
-  // to a generic failure). Reporting `detected: false` here is deliberate —
+  // to a generic failure). Reporting no limit here is deliberate —
   // guessing from an unverified text pattern would risk false positives that
   // send the handoff module hunting for a replacement backend on an
   // unrelated error. Revisit if either CLI starts surfacing a documented
   // limit signal.
-  return { detected: false };
+  return notALimit;
 }

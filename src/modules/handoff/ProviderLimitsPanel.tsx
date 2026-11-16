@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
 import { RefreshCw } from 'lucide-react';
 
 import { api, readApiJson } from '@/shared/api';
 import { LLM_PROVIDER_NAMES } from '@/shared/constants';
 import type { LLMProvider } from '@/shared/types';
+import { DEFAULT_HANDOFF_THRESHOLD_PERCENT, readUserPreference, subscribeToUserPreferences } from '@/shared/userSettings';
 import { cn } from '@/shared/utils';
 
 /** One subscription window as `GET /api/providers/limits` reports it (mirrors the server's `ProviderLimitWindowSnapshot`). */
@@ -22,12 +23,38 @@ type ProviderLimits = {
   sevenDay: ProviderLimitWindow | null;
 };
 
-function formatTime(iso: string, language: string): string {
-  const date = new Date(iso);
-  return Number.isNaN(date.getTime()) ? iso : date.toLocaleString(language, { dateStyle: 'short', timeStyle: 'short' });
+/** How often the "N minutes ago" texts are recomputed. */
+const CLOCK_TICK_MS = 30_000;
+
+/** An absolute time in the viewer's own time zone and locale. */
+function formatLocalTime(ms: number, language: string): string {
+  return new Date(ms).toLocaleString(language, { dateStyle: 'short', timeStyle: 'short' });
 }
 
-function LimitWindowRow({ label, window }: { label: string; window: ProviderLimitWindow | null }) {
+/** "5 minutes ago" / "in 2 hours", in the viewer's language, in the largest unit that fits. */
+function formatRelative(ms: number, now: number, language: string): string {
+  const deltaSeconds = Math.round((ms - now) / 1000);
+  const units: Array<[Intl.RelativeTimeFormatUnit, number]> = [['day', 86_400], ['hour', 3_600], ['minute', 60]];
+  const formatter = new Intl.RelativeTimeFormat(language, { numeric: 'auto' });
+  for (const [unit, seconds] of units) {
+    if (Math.abs(deltaSeconds) >= seconds) {
+      return formatter.format(Math.trunc(deltaSeconds / seconds), unit);
+    }
+  }
+  return formatter.format(0, 'minute');
+}
+
+function LimitWindowRow({
+  label,
+  window,
+  now,
+  thresholdPercent,
+}: {
+  label: string;
+  window: ProviderLimitWindow | null;
+  now: number;
+  thresholdPercent: number;
+}) {
   const { t, i18n } = useTranslation('settings');
   if (!window) {
     return (
@@ -38,13 +65,28 @@ function LimitWindowRow({ label, window }: { label: string; window: ProviderLimi
     );
   }
 
+  const observedMs = Date.parse(window.observedAt);
+  const resetsMs = window.resetsAt ? Date.parse(window.resetsAt) : Number.NaN;
+  const hasReset = Number.isFinite(resetsMs) && resetsMs <= now;
+  // 100 means the user turned early switching off: only a refusal warns then.
+  const overThreshold = !hasReset && thresholdPercent < 100 && window.usedPercent !== null && window.usedPercent >= thresholdPercent;
   const barColor = window.status === 'rejected' || (window.usedPercent ?? 0) >= 95
     ? 'bg-red-500'
-    : window.status === 'allowed_warning' || (window.usedPercent ?? 0) >= 80 ? 'bg-amber-500' : 'bg-emerald-500';
+    : overThreshold || window.status === 'allowed_warning' ? 'bg-amber-500' : 'bg-emerald-500';
+
   const details = [
-    window.status !== 'allowed' ? t(`agents.providerLimits.status.${window.status}`) : null,
-    window.resetsAt ? t('agents.providerLimits.resetsAt', { time: formatTime(window.resetsAt, i18n.language) }) : null,
-    t('agents.providerLimits.observedAt', { time: formatTime(window.observedAt, i18n.language) }),
+    window.status !== 'allowed' && !hasReset ? t(`agents.providerLimits.status.${window.status}`) : null,
+    Number.isFinite(resetsMs)
+      ? (hasReset
+        ? t('agents.providerLimits.resetPassed', { time: formatLocalTime(resetsMs, i18n.language) })
+        : t('agents.providerLimits.resetsAt', {
+          time: formatLocalTime(resetsMs, i18n.language),
+          relative: formatRelative(resetsMs, now, i18n.language),
+        }))
+      : null,
+    Number.isFinite(observedMs)
+      ? t('agents.providerLimits.observedAt', { relative: formatRelative(observedMs, now, i18n.language) })
+      : null,
   ].filter(Boolean).join(' · ');
 
   return (
@@ -62,14 +104,23 @@ function LimitWindowRow({ label, window }: { label: string; window: ProviderLimi
           <div className={cn('h-full rounded-full', barColor)} style={{ width: `${Math.min(100, window.usedPercent)}%` }} />
         </div>
       )}
-      <div className="text-xs text-muted-foreground">{details}</div>
+      <div className="text-xs text-muted-foreground" title={Number.isFinite(observedMs) ? formatLocalTime(observedMs, i18n.language) : undefined}>
+        {details}
+      </div>
+      {overThreshold && (
+        <div className="text-xs text-amber-700 dark:text-amber-400">
+          {t('agents.providerLimits.overThreshold', { threshold: thresholdPercent })}
+        </div>
+      )}
     </div>
   );
 }
 
 /**
  * "Subscription limits": the last 5-hour and weekly usage Claude and Codex
- * themselves reported, with reset times and how old each reading is. Shows
+ * themselves reported, with reset times in the viewer's own time, how old
+ * each reading is, and a warning once usage reaches the user's handoff
+ * threshold. Shows
  * "no data" for a window the server has not received, never an estimate.
  * Rendered once by the settings module's agents tab, above the handoff
  * threshold it informs.
@@ -83,6 +134,18 @@ export default function ProviderLimitsPanel() {
 
   // Bumped by the refresh button; each change asks the server again.
   const [reloadCount, setReloadCount] = useState(0);
+  // The current time, advanced on a timer so "N minutes ago" stays true while the screen is open.
+  const [now, setNow] = useState(() => Date.now());
+  // Follows the threshold select rendered just below, so the warning moves with it.
+  const thresholdPercent = useSyncExternalStore(
+    subscribeToUserPreferences,
+    () => readUserPreference('handoffThresholdPercent', DEFAULT_HANDOFF_THRESHOLD_PERCENT),
+  );
+
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), CLOCK_TICK_MS);
+    return () => clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -93,6 +156,7 @@ export default function ProviderLimitsPanel() {
           if (!cancelled) {
             setLimits(body.data.providers);
             setLoadFailed(false);
+            setNow(Date.now());
           }
         },
         () => {
@@ -129,8 +193,8 @@ export default function ProviderLimitsPanel() {
           {limits.map((entry) => (
             <div key={entry.provider} className="flex flex-col gap-2 rounded-md border border-border/50 p-3">
               <div className="font-medium text-foreground">{LLM_PROVIDER_NAMES[entry.provider] ?? entry.provider}</div>
-              <LimitWindowRow label={t('agents.providerLimits.fiveHour')} window={entry.fiveHour} />
-              <LimitWindowRow label={t('agents.providerLimits.sevenDay')} window={entry.sevenDay} />
+              <LimitWindowRow label={t('agents.providerLimits.fiveHour')} window={entry.fiveHour} now={now} thresholdPercent={thresholdPercent} />
+              <LimitWindowRow label={t('agents.providerLimits.sevenDay')} window={entry.sevenDay} now={now} thresholdPercent={thresholdPercent} />
             </div>
           ))}
         </div>

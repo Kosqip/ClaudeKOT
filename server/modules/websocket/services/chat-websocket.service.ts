@@ -5,7 +5,7 @@ import type { WebSocket } from 'ws';
 
 import { sessionsDb } from '@/modules/database/index.js';
 import {
-  detectProviderLimit,
+  classifyProviderTurnOutcome,
   MAX_CONCURRENT_SIDE_QUESTIONS_PER_SESSION,
   providerCapabilitiesService,
   providerModelsService,
@@ -26,6 +26,7 @@ import type {
   LLMProvider,
   ProviderFatalFailureCause,
   ProviderPermissionDecision,
+  ProviderTurnOutcome,
   ProviderRuntimeWriter,
   RateLimitStatus,
   SideQuestion,
@@ -136,9 +137,12 @@ type ChatWebSocketDependencies = {
 /**
  * How one turn the app ran itself ended: whether it started, its error text
  * (a thrown failure, or the runtime's own error message when that error is
- * one no backend can fix) and, for the latter, `failureCause`.
+ * one no backend can fix) and, for the latter, the typed `outcome`
+ * (`kind: 'fatal'`) the orchestrator fails fast on. Only a fatal outcome is
+ * reported here today; a limit reaches callers through the handoff module's
+ * limited-provider record.
  */
-type DetachedTurnOutcome = { started: boolean; error: string | null; failureCause?: ProviderFatalFailureCause };
+type DetachedTurnOutcome = { started: boolean; error: string | null; outcome?: ProviderTurnOutcome };
 
 type ChatRunHooks = Pick<ChatWebSocketDependencies, 'onRunFailed' | 'onRateLimitStatus' | 'onRunCompleted'>;
 
@@ -439,9 +443,9 @@ async function dispatchRun(
     await dependencies.runtime.run(provider, command, runtimeOptions, writerWithLimitSignal);
   } catch (error) {
     failure = error instanceof Error ? error.message : String(error);
-    const thrownDetection = detectProviderLimit(provider, { message: failure });
-    if (!fatalFailure && !thrownDetection.detected && thrownDetection.fatalCause) {
-      fatalFailure = { cause: thrownDetection.fatalCause, message: failure };
+    const thrownOutcome = classifyProviderTurnOutcome(provider, { message: failure });
+    if (!fatalFailure && thrownOutcome.kind === 'fatal') {
+      fatalFailure = { cause: thrownOutcome.cause, message: failure };
     }
     console.error(`[Chat] Provider runtime "${provider}" failed`, { sessionId, error: failure });
     try {
@@ -461,7 +465,7 @@ async function dispatchRun(
   // TypeScript cannot see the Proxy's closure assigning `fatalFailure`.
   const fatal = fatalFailure as { cause: ProviderFatalFailureCause; message: string } | null;
   return fatal
-    ? { started: true, error: failure ?? fatal.message, failureCause: fatal.cause }
+    ? { started: true, error: failure ?? fatal.message, outcome: { kind: 'fatal', cause: fatal.cause } }
     : { started: true, error: failure };
 }
 
@@ -478,12 +482,12 @@ function labelFatalFailure(provider: LLMProvider, data: unknown): ProviderFatalF
     return null;
   }
   if (!message.failureCause) {
-    const detection = detectProviderLimit(provider, {
+    const outcome = classifyProviderTurnOutcome(provider, {
       message: message.content,
       claudeSdkError: typeof message.providerErrorCode === 'string' ? message.providerErrorCode : undefined,
     });
-    if (!detection.detected && detection.fatalCause) {
-      message.failureCause = detection.fatalCause;
+    if (outcome.kind === 'fatal') {
+      message.failureCause = outcome.cause;
     }
   }
   return (message.failureCause as ProviderFatalFailureCause | undefined) ?? null;

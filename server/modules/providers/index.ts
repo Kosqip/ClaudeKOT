@@ -8,12 +8,14 @@ export { providerRuntimeService } from './services/provider-runtime.service.js';
 // that is not installed or not signed in before handing a session to it.
 export { providerAuthService } from './services/provider-auth.service.js';
 
-// detectProviderLimit: used by the handoff module to tell a subscription/rate
-// limit apart from an ordinary runtime failure before switching backends.
+// classifyProviderTurnOutcome: the typed outcome (limit / fatal / transient /
+// none) of a provider signal. Used by the handoff module before switching
+// backends and by the websocket module's chat gateway to label a failure
+// and report it in a turn's outcome (which the orchestrator reads).
 // mapClaudeRateLimitType: used by the handoff module's proactive threshold
 // path (server/index.ts) to name a reason from a live utilization reading,
-// without waiting for detectProviderLimit's own rejected-only signal.
-export { detectProviderLimit, mapClaudeRateLimitType } from './services/provider-limit-detection.service.js';
+// without waiting for a rejected window.
+export { classifyProviderTurnOutcome, mapClaudeRateLimitType } from './services/provider-limit-detection.service.js';
 
 // providerModelsService: used by Commands to list models and resolve the active session model.
 export { providerModelsService } from './services/provider-models.service.js';

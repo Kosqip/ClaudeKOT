@@ -28,7 +28,11 @@ vi.mock('@/shared/api', () => ({
               fiveHour: { usedPercent: 87.5, resetsAt: '2026-11-14T13:00:00.000Z', status: 'allowed_warning', observedAt: '2026-11-14T10:00:00.000Z' },
               sevenDay: null,
             },
-            { provider: 'codex', fiveHour: null, sevenDay: null },
+            {
+              provider: 'codex',
+              fiveHour: null,
+              sevenDay: { usedPercent: 92, resetsAt: '2099-01-01T00:00:00.000Z', status: 'allowed_warning', observedAt: '2026-11-14T10:00:00.000Z' },
+            },
           ],
         },
       }), { status: 200, headers: { 'content-type': 'application/json' } }),
@@ -39,11 +43,13 @@ vi.mock('@/shared/api', () => ({
 
 const { default: ProviderLimitsPanel } = await import('@/modules/handoff/ProviderLimitsPanel');
 
-test('a reported window shows its usage and every unreported window shows "no data"', async () => {
+test('a reported window shows its usage, an unreported one "no data", and usage at the threshold a warning', async () => {
   render(<ProviderLimitsPanel />);
 
   assert.ok(await screen.findByText('agents.providerLimits.used:87.5'));
-  assert.equal(screen.getAllByText('agents.providerLimits.noData').length, 3);
+  assert.equal(screen.getAllByText('agents.providerLimits.noData').length, 2);
+  // 92% is at or above the default 90% threshold; 87.5% is not.
+  assert.equal(screen.getAllByText('agents.providerLimits.overThreshold').length, 1);
   assert.ok(screen.getByText('Claude'));
   assert.ok(screen.getByText('Codex'));
 });

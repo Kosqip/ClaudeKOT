@@ -168,6 +168,6 @@ test('an error no backend can fix is labelled for the UI, reaches onRunFailed wi
 
     assert.deepEqual(failures, [{ provider: 'claude', sessionId, userId: 1, message: 'Invalid API key · Please run /login', errorCode: 'authentication_failed' }]);
     assert.equal(sent[0].failureCause, 'auth_required');
-    assert.deepEqual(result, { started: true, error: 'Invalid API key · Please run /login', failureCause: 'auth_required' });
+    assert.deepEqual(result, { started: true, error: 'Invalid API key · Please run /login', outcome: { kind: 'fatal', cause: 'auth_required' } });
   });
 });

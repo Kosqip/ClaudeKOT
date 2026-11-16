@@ -548,8 +548,10 @@
       "noData": "no data",
       "used": "{{percent}}% used",
       "usedUnknown": "usage not reported",
-      "resetsAt": "resets {{time}}",
-      "observedAt": "reported {{time}}",
+      "resetsAt": "resets {{time}} ({{relative}})",
+      "resetPassed": "window reset at {{time}} — no newer reading yet",
+      "observedAt": "reported {{relative}}",
+      "overThreshold": "At or above your switch threshold ({{threshold}}%): the orchestrator gives new subtasks to the next backend of the role when one is free.",
       "status": {
         "allowed_warning": "close to the limit",
         "rejected": "limit reached"

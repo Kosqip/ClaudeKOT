@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
 import { orchestratorRunsDb, sessionsDb } from '@/modules/database/index.js';
-import { getProviderLimitedUntil } from '@/modules/handoff/index.js';
+import { getProviderLimitedUntil, isProviderOverUsageThreshold, readHandoffThresholdPercent } from '@/modules/handoff/index.js';
 import {
   buildCommitteeAnswerPrompt,
   buildCommitteeClaimsPrompt,
@@ -47,6 +47,7 @@ import type {
   OrchestratorSubtaskResult,
   ProviderFatalFailureCause,
   ProviderRole,
+  ProviderTurnOutcome,
 } from '@/shared/types.js';
 
 /** Rounds a run gets when the caller names none: the plan, then one round of follow-ups. */
@@ -71,10 +72,16 @@ const MAX_PAUSE_SLICE_MS = 5 * 60 * 1000;
  * say until when a backend is at its usage limit (null: it is free).
  */
 export type OrchestratorRunDependencies = {
-  runTurn(input: { sessionId: string; userId: number; content: string; options?: Record<string, unknown> }): Promise<{ started: boolean; error: string | null; failureCause?: ProviderFatalFailureCause }>;
+  runTurn(input: { sessionId: string; userId: number; content: string; options?: Record<string, unknown> }): Promise<{ started: boolean; error: string | null; outcome?: ProviderTurnOutcome }>;
   readLastReply(sessionId: string): Promise<string | null>;
   abortTurn(sessionId: string): Promise<void>;
   limitedUntil(provider: LLMProvider): number | null;
+  /**
+   * Whether the backend's last reported usage is at or above the user's
+   * handoff threshold — not at its limit yet, but close. Optional: without
+   * it (tests) no backend is treated as close to its limit.
+   */
+  overUsageThreshold?(provider: LLMProvider, userId: number): boolean;
 };
 
 /** The real dependencies: turns go through the chat pipeline, replies are read from session history. */
@@ -101,6 +108,7 @@ export function createOrchestratorRunDependencies(runtime: ProviderRuntimeGatewa
       chatRunRegistry.completeRunIfCurrent(activeRun, { exitCode: aborted ? 0 : 1, aborted: true });
     },
     limitedUntil: (provider) => getProviderLimitedUntil(provider),
+    overUsageThreshold: (provider, userId) => isProviderOverUsageThreshold(provider, readHandoffThresholdPercent(userId)),
   };
 }
 
@@ -337,7 +345,7 @@ function throwIfStopped(state: RunState): void {
 
 /**
  * Waits for one of `candidates` to be free and returns it — at once when
- * one already is. Otherwise the run is shown as paused until the earliest
+ * one already is (for a subtask, preferring one not close to its limit). Otherwise the run is shown as paused until the earliest
  * limit resets, and the choice is made again then, so whichever backend
  * comes back first (in chain order) gets the work. "Continue now" ends the
  * wait early and takes the first candidate as it is: the limit may have
@@ -355,9 +363,15 @@ async function acquireProvider(
   const control = controlOf(state.run.id);
   for (;;) {
     throwIfStopped(state);
-    const free = candidates.find((provider) => dependencies.limitedUntil(provider) === null);
-    if (free) {
-      return free;
+    const free = candidates.filter((provider) => dependencies.limitedUntil(provider) === null);
+    if (free.length > 0) {
+      // A subtask goes past a backend close to its limit (usage at or above
+      // the user's threshold) to the next free one of the chain; with no
+      // other free backend it still takes that one. The coordinator keeps
+      // its session until an actual limit.
+      return phase === 'running'
+        ? free.find((provider) => !dependencies.overUsageThreshold?.(provider, state.userId)) ?? free[0]
+        : free[0];
     }
 
     const waits = candidates.map((provider) => ({ provider, until: dependencies.limitedUntil(provider) ?? 0 }));
@@ -396,7 +410,7 @@ async function runTrackedTurn(
   state: RunState,
   input: { sessionId: string; content: string; options?: Record<string, unknown> },
   dependencies: OrchestratorRunDependencies,
-): Promise<{ started: boolean; error: string | null; failureCause?: ProviderFatalFailureCause }> {
+): Promise<{ started: boolean; error: string | null; outcome?: ProviderTurnOutcome }> {
   const control = controlOf(state.run.id);
   control.activeTurns.add(input.sessionId);
   try {
@@ -483,8 +497,8 @@ async function askCoordinator<T>(
       // Fail fast: a backend that cannot work at all (CLI missing, sign-in,
       // unknown model) is not replaced by the next one in the chain — that
       // would only spend its limit on a setup problem the user has to fix.
-      if (turn.failureCause) {
-        throw new AppError(describeFatalFailure(provider, turn.failureCause, turn.error), {
+      if (turn.outcome?.kind === 'fatal') {
+        throw new AppError(describeFatalFailure(provider, turn.outcome.cause, turn.error), {
           code: 'ORCHESTRATOR_BACKEND_UNUSABLE',
           statusCode: 502,
         });
@@ -589,10 +603,10 @@ async function runDelegatedTurn(
       // Fail fast: the next backend in the chain is not tried for a failure
       // no backend can fix (CLI missing, sign-in, unknown model) — the
       // subtask is failed with the reason, and no other limit is spent on it.
-      if (turn.failureCause) {
+      if (turn.outcome?.kind === 'fatal') {
         throwIfStopped(state);
-        const report = fail('failed', describeFatalFailure(provider, turn.failureCause, turn.error));
-        entry.failureCause = turn.failureCause;
+        const report = fail('failed', describeFatalFailure(provider, turn.outcome.cause, turn.error));
+        entry.failureCause = turn.outcome.cause;
         return report;
       }
       const reply = turn.started ? await dependencies.readLastReply(sessionId) : null;

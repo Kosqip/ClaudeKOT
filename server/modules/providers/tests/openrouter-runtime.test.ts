@@ -9,7 +9,7 @@ import { OPENROUTER_PREDEFINED_MODELS } from '@/modules/providers/list/openroute
 import { readOpenRouterHistory } from '@/modules/providers/list/openrouter/openrouter-history.store.js';
 import { openRouterRuntime } from '@/modules/providers/list/openrouter/openrouter-runtime.provider.js';
 import { parseModelReference } from '@/modules/providers/list/openrouter/openrouter-service-registry.js';
-import { detectProviderLimit } from '@/modules/providers/services/provider-limit-detection.service.js';
+import { classifyProviderTurnOutcome } from '@/modules/providers/services/provider-limit-detection.service.js';
 import type { AnyRecord, ProviderRuntimeContext } from '@/shared/types.js';
 
 const KEY_ENV_VARS = ['OPENROUTER_API_KEY', 'ANTHROPIC_DIRECT_API_KEY', 'OPENAI_DIRECT_API_KEY'] as const;
@@ -193,8 +193,8 @@ test('a 429 from any service is reported in the form the limit detector recognis
   const error = turn.sent.find((message) => message.kind === 'error');
   assert.match(String(error?.content), /^openai request failed \(429\)/);
   assert.deepEqual(
-    detectProviderLimit('openrouter', { message: String(error?.content) }),
-    { detected: true, reason: 'rate_limit' },
+    classifyProviderTurnOutcome('openrouter', { message: String(error?.content) }),
+    { kind: 'limit', reason: 'rate_limit' },
   );
 });
 

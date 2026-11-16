@@ -4,7 +4,13 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { handoffLinksDb, sessionsDb, userPreferencesDb } from '@/modules/database/index.js';
-import { detectProviderLimit, mapClaudeRateLimitType, providerAuthService, sessionsService } from '@/modules/providers/index.js';
+import {
+  classifyProviderTurnOutcome,
+  mapClaudeRateLimitType,
+  providerAuthService,
+  providerLimitsStore,
+  sessionsService,
+} from '@/modules/providers/index.js';
 import type { ProviderRuntimeGateway } from '@/modules/websocket/index.js';
 import { broadcastToConnectedClients, startDetachedChatTurn } from '@/modules/websocket/index.js';
 import { AppError, isTextOnlyProvider } from '@/shared/utils.js';
@@ -121,6 +127,52 @@ export function resetHandoffState(): void {
 export const DEFAULT_HANDOFF_THRESHOLD_PERCENT = 90;
 
 /**
+ * One user's handoff threshold (`handoffThresholdPercent`), or
+ * `DEFAULT_HANDOFF_THRESHOLD_PERCENT` when they set none. Used by
+ * `server/index.ts` for its threshold checks and by the orchestrator's
+ * dependencies for `isProviderOverUsageThreshold`.
+ */
+export function readHandoffThresholdPercent(userId: number): number {
+  const stored = userPreferencesDb.getPreferences(userId).handoffThresholdPercent;
+  return typeof stored === 'number' ? stored : DEFAULT_HANDOFF_THRESHOLD_PERCENT;
+}
+
+/** How long a window lasts, for a reading that came without a reset time. */
+const LIMIT_WINDOW_LENGTH_MS = { fiveHour: 5 * 60 * 60 * 1000, sevenDay: 7 * 24 * 60 * 60 * 1000 } as const;
+
+/**
+ * True when the provider limits store holds a still-current reading of
+ * `provider` at or above `thresholdPercent` in its five-hour or weekly
+ * window. A reading counts only while its window has not reset (by its
+ * `resetsAt`, or — when the provider gave none — for one window length after
+ * it was received), and only when the provider reported a percentage: an
+ * unknown usage is never treated as high. `thresholdPercent` 100 (the user
+ * turned early switching off) never matches. Used by the orchestrator to
+ * prefer the next backend of a role's chain over one close to its limit,
+ * and by this module's tests.
+ */
+export function isProviderOverUsageThreshold(provider: LLMProvider, thresholdPercent: number, now: number = Date.now()): boolean {
+  if (thresholdPercent >= 100) {
+    return false;
+  }
+  const snapshot = providerLimitsStore.list().find((entry) => entry.provider === provider);
+  if (!snapshot) {
+    return false;
+  }
+  return (['fiveHour', 'sevenDay'] as const).some((field) => {
+    const window = snapshot[field];
+    if (!window || window.usedPercent === null || window.usedPercent < thresholdPercent) {
+      return false;
+    }
+    const resetsAtMs = window.resetsAt ? Date.parse(window.resetsAt) : Number.NaN;
+    const stillCurrentUntil = Number.isFinite(resetsAtMs)
+      ? resetsAtMs
+      : Date.parse(window.observedAt) + LIMIT_WINDOW_LENGTH_MS[field];
+    return stillCurrentUntil > now;
+  });
+}
+
+/**
  * Decides whether one live `rate_limit_status` reading should trigger a
  * handoff, and if so, the reason to record.
  *
@@ -160,7 +212,8 @@ export function shouldHandoffForRateLimitStatus(
  *   started (it would only spend the fallback's limit on a doomed turn); the
  *   chat shows the error with a localized explanation instead.
  * - `handoff` — a subscription/rate limit: move the session to a fallback.
- * - `none` — any other failure: left to the user, as before.
+ * - `none` — a passing (`transient`) or unrecognized failure: left to the
+ *   user, as before.
  *
  * `errorCode` is the provider's structured code when there is one (Claude's
  * `SDKAssistantMessageError`); the message text is used only where the
@@ -174,16 +227,17 @@ export function decideHandoffForRunFailure(
   | { action: 'handoff'; reason: ProviderLimitReason }
   | { action: 'fail_fast'; cause: ProviderFatalFailureCause }
   | { action: 'none' } {
-  const detection = detectProviderLimit(provider, {
+  const outcome = classifyProviderTurnOutcome(provider, {
     message: failure.message,
     claudeSdkError: provider === 'claude' ? failure.errorCode : undefined,
   });
-  if (detection.detected) {
-    return { action: 'handoff', reason: detection.reason };
+  if (outcome.kind === 'limit') {
+    return { action: 'handoff', reason: outcome.reason };
   }
-  if (detection.fatalCause) {
-    return { action: 'fail_fast', cause: detection.fatalCause };
+  if (outcome.kind === 'fatal') {
+    return { action: 'fail_fast', cause: outcome.cause };
   }
+  // A transient failure may pass on a retry; moving the session would not help.
   return { action: 'none' };
 }
 

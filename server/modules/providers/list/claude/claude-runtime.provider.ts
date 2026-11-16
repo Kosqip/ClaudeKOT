@@ -39,7 +39,7 @@ import {
   notifyUserIfEnabled
 } from '@/modules/notifications/index.js';
 import { sessionHistoryCache } from '@/modules/providers/services/session-history-cache.service.js';
-import { detectProviderLimit } from '@/modules/providers/services/provider-limit-detection.service.js';
+import { classifyProviderTurnOutcome } from '@/modules/providers/services/provider-limit-detection.service.js';
 import {
   getReportedClaudeContextWindow,
   rememberClaudeContextWindow
@@ -1648,7 +1648,7 @@ async function queryClaudeSDK(
       // changes, including an `allowed_warning` before any request is
       // actually rejected — not only at the hard stop. Forwarded as its own
       // message kind (rather than folded into an error) so the UI can show a
-      // live usage percentage, and so `detectProviderLimit` gets the
+      // live usage percentage, and so `classifyProviderTurnOutcome` gets the
       // structured `rate_limit_info` instead of only free text once a
       // request fails outright.
       if (message.type === 'rate_limit_event') {
@@ -1722,8 +1722,8 @@ async function queryClaudeSDK(
       // added carrying that code, so the chat gateway's fail-fast check and
       // the UI read the code itself rather than the reply's wording.
       if (message.type === 'assistant' && !message.parent_tool_use_id && typeof message.error === 'string') {
-        const detection = detectProviderLimit('claude', { claudeSdkError: message.error });
-        if (!detection.detected && detection.fatalCause) {
+        const outcome = classifyProviderTurnOutcome('claude', { claudeSdkError: message.error });
+        if (outcome.kind === 'fatal') {
           const replyText = Array.isArray(message.message?.content)
             ? (message.message.content as AnyRecord[])
               .map((part) => (part?.type === 'text' && typeof part.text === 'string' ? part.text : ''))
@@ -1734,7 +1734,7 @@ async function queryClaudeSDK(
             kind: 'error',
             content: replyText || `Claude request failed: ${message.error}`,
             providerErrorCode: message.error,
-            failureCause: detection.fatalCause,
+            failureCause: outcome.cause,
             sessionId: sid,
             provider: 'claude',
           }));

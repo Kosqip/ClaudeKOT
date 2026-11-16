@@ -520,8 +520,10 @@
       "noData": "нет данных",
       "used": "израсходовано {{percent}}%",
       "usedUnknown": "расход не сообщён",
-      "resetsAt": "сброс {{time}}",
-      "observedAt": "получено {{time}}",
+      "resetsAt": "сброс {{time}} ({{relative}})",
+      "resetPassed": "окно сброшено в {{time}} — новых данных пока нет",
+      "observedAt": "получено {{relative}}",
+      "overThreshold": "Достигнут порог переключения ({{threshold}}%): оркестратор отдаёт новые подзадачи следующему бэкенду роли, если тот свободен.",
       "status": {
         "allowed_warning": "близко к лимиту",
         "rejected": "лимит исчерпан"

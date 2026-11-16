@@ -561,7 +561,7 @@ test('a subtask whose backend cannot work at all fails with the reason instead o
       runTurn: async (input) => {
         const outcome = await dependencies.runTurn(input);
         return sessionsDb.getSessionById(input.sessionId)?.provider === 'codex'
-          ? { started: true, error: 'Your refresh token has expired. Please log in again.', failureCause: 'auth_required' }
+          ? { started: true, error: 'Your refresh token has expired. Please log in again.', outcome: { kind: 'fatal', cause: 'auth_required' } }
           : outcome;
       },
     };
@@ -662,5 +662,24 @@ test('committee: a single free backend is refused at the start', async () => {
   await withOrchestrator([], async ({ dependencies, limits }) => {
     limits.set('codex', Date.now() + 3_600_000);
     assert.throws(() => startCommittee(dependencies, { claude: 'orchestrator', codex: 'hands' }), /at least two backends/);
+  });
+});
+
+test('a subtask goes past a backend close to its limit to the next one of the chain, and still takes it when nobody else is free', async () => {
+  await withOrchestrator([json(ONE_BUILD), CLOSED], async ({ dependencies, subtaskTurns }) => {
+    const nearLimit: OrchestratorRunDependencies = { ...dependencies, overUsageThreshold: (provider) => provider === 'codex' };
+    const { run, finished } = start(nearLimit);
+    await finished;
+    assert.equal(getOrchestratorRun(run.id)!.phase, 'done');
+    // Codex holds "hands" but is over the threshold; Claude, next in the chain, gets it.
+    assert.deepEqual(subtaskTurns().map((turn) => turn.provider), ['claude']);
+  });
+
+  await withOrchestrator([json(ONE_BUILD), CLOSED], async ({ dependencies, subtaskTurns }) => {
+    // Every candidate is close to its limit: the chain's own order decides, nothing waits.
+    const nearLimit: OrchestratorRunDependencies = { ...dependencies, overUsageThreshold: () => true };
+    const { finished } = start(nearLimit);
+    await finished;
+    assert.deepEqual(subtaskTurns().map((turn) => turn.provider), ['codex']);
   });
 });

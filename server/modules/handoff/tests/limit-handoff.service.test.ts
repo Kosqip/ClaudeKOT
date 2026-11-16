@@ -10,6 +10,7 @@ import {
   decideHandoffForRunFailure,
   DEFAULT_FALLBACK_ORDER,
   handoffSessionOnLimit,
+  isProviderOverUsageThreshold,
   isProviderLimited,
   markProviderLimited,
   pickFallbackProvider,
@@ -21,6 +22,7 @@ import {
   tryClaimHandoff,
   writeHandoffContextFile,
 } from '@/modules/handoff/services/limit-handoff.service.js';
+import { providerLimitsStore } from '@/modules/providers/index.js';
 import { chatRunRegistry } from '@/modules/websocket/index.js';
 import type { ProviderRuntimeGateway } from '@/modules/websocket/index.js';
 
@@ -397,4 +399,31 @@ test('decideHandoffForRunFailure leaves any other failure alone', () => {
 
 test('a Claude error code is not applied to another provider', () => {
   assert.deepEqual(decideHandoffForRunFailure('codex', { message: 'boom', errorCode: 'authentication_failed' }), { action: 'none' });
+});
+
+test('decideHandoffForRunFailure moves nothing on a transient failure', () => {
+  assert.deepEqual(decideHandoffForRunFailure('claude', { message: 'Overloaded', errorCode: 'overloaded' }), { action: 'none' });
+  assert.deepEqual(decideHandoffForRunFailure('openrouter', { message: 'openrouter request failed (503): busy' }), { action: 'none' });
+});
+
+// ---- Early preference: usage at or above the user's threshold ----
+
+test('isProviderOverUsageThreshold reads the limits store: only a current, reported percentage at or above the threshold counts', async () => {
+  await withHandoffDatabase(async () => {
+    const now = Date.parse('2026-11-16T12:00:00.000Z');
+    // Codex: weekly window at 92%, resets tomorrow.
+    providerLimitsStore.record('codex', { status: 'allowed_warning', rateLimitType: 'seven_day', utilization: 0.92, resetsAt: '2026-11-17T00:00:00.000Z' });
+    assert.equal(isProviderOverUsageThreshold('codex', 90, now), true);
+    assert.equal(isProviderOverUsageThreshold('codex', 95, now), false);
+    // 100 means the user turned early switching off.
+    assert.equal(isProviderOverUsageThreshold('codex', 100, now), false);
+    // After the reset the reading no longer counts.
+    assert.equal(isProviderOverUsageThreshold('codex', 90, Date.parse('2026-11-17T00:00:01.000Z')), false);
+
+    // Claude: a five-hour reading without a percentage is never "high".
+    providerLimitsStore.record('claude', { status: 'allowed_warning', rateLimitType: 'five_hour' });
+    assert.equal(isProviderOverUsageThreshold('claude', 80, now), false);
+    // A providers without plan windows is never over.
+    assert.equal(isProviderOverUsageThreshold('openrouter', 80, now), false);
+  });
 });

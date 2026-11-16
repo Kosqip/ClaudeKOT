@@ -22,7 +22,7 @@ import {
 import { broadcastToConnectedClients, chatRunRegistry, createWebSocketServer, onRunSettled, setDefaultChatRunHooks } from '@/modules/websocket/index.js';
 import {
     decideHandoffForRunFailure,
-    DEFAULT_HANDOFF_THRESHOLD_PERCENT,
+    readHandoffThresholdPercent,
     handoffSessionOnLimit,
     readStoredFallbackOrder,
     releaseHandoffClaim,
@@ -78,7 +78,7 @@ import { fileTreeRoutes } from './modules/file-tree/index.js';
 import { worktreesRoutes } from './modules/worktrees/index.js';
 import browserUseMcpRoutes from './modules/browser-use/browser-use-mcp.routes.js';
 import { browserUseService } from './modules/browser-use/browser-use.service.js';
-import { initializeDatabase, sessionsDb, userPreferencesDb } from './modules/database/index.js';
+import { initializeDatabase, sessionsDb } from './modules/database/index.js';
 import { configureWebPush } from './modules/notifications/index.js';
 
 const __dirname = getModuleDirectory(import.meta.url);
@@ -241,8 +241,7 @@ function handleRateLimitStatusForAutoHandoff(input: { provider: LLMProvider; ses
         return;
     }
 
-    const storedThreshold = userPreferencesDb.getPreferences(userId).handoffThresholdPercent;
-    const thresholdPercent = typeof storedThreshold === 'number' ? storedThreshold : DEFAULT_HANDOFF_THRESHOLD_PERCENT;
+    const thresholdPercent = readHandoffThresholdPercent(userId);
 
     const decision = shouldHandoffForRateLimitStatus(input.status, thresholdPercent);
     if (!decision.handoff) {
@@ -337,11 +336,7 @@ function handleRunCompletedForUsage(input: { provider: LLMProvider; sessionId: s
         if (userId === null) {
             return;
         }
-        const storedThreshold = userPreferencesDb.getPreferences(userId).handoffThresholdPercent;
-        const decision = shouldHandoffForRateLimitStatus(
-            status,
-            typeof storedThreshold === 'number' ? storedThreshold : DEFAULT_HANDOFF_THRESHOLD_PERCENT,
-        );
+        const decision = shouldHandoffForRateLimitStatus(status, readHandoffThresholdPercent(userId));
         if (decision.handoff) {
             offerHandoff({
                 sessionId: input.sessionId,
