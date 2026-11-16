@@ -1,5 +1,8 @@
 import type {
   LLMProvider,
+  OrchestratorClaimOutcome,
+  OrchestratorCommitteeClaim,
+  OrchestratorCommitteeVote,
   OrchestratorFindingSeverity,
   OrchestratorReviewFinding,
   OrchestratorSubtask,
@@ -87,14 +90,17 @@ export function buildCoordinatorTakeoverNote(): string {
   return 'You are taking over the coordination of a task from another AI backend that ran out of its usage limit. Everything you need is in this message; the earlier conversation is not available to you.\n\n';
 }
 
-export function buildPlanRetryPrompt(problem: string, shape: 'plan' | 'review'): string {
+export function buildPlanRetryPrompt(problem: string, shape: 'plan' | 'review' | 'claims'): string {
+  const expected = {
+    plan: `{"subtasks": [${SUBTASK_SHAPE}]}`,
+    review: `{"status": "done", "summary": "what was achieved, for the user"}  or  {"status": "continue", "subtasks": [${SUBTASK_SHAPE}]}`,
+    claims: COMMITTEE_CLAIMS_SHAPE,
+  };
   return [
     `Your last reply could not be used: ${problem}`,
     'Reply again with ONLY a single fenced JSON code block and nothing else, in exactly this shape:',
     '```json',
-    shape === 'plan'
-      ? `{"subtasks": [${SUBTASK_SHAPE}]}`
-      : `{"status": "done", "summary": "what was achieved, for the user"}  or  {"status": "continue", "subtasks": [${SUBTASK_SHAPE}]}`,
+    expected[shape],
     '```',
   ].join('\n');
 }
@@ -475,6 +481,170 @@ export function findRepeatedPairFindings(
 ): OrchestratorReviewFinding[] {
   const earlier = new Set(listOpenPairFindings(previous).map((finding) => normalizeFindingText(finding.text)));
   return listOpenPairFindings(current).filter((finding) => earlier.has(normalizeFindingText(finding.text)));
+}
+
+// ---------------------------
+// Committee mode: blind answers → merged claims → a vote on each claim → a summary.
+
+const COMMITTEE_CLAIMS_SHAPE = '{"claims": [{"text": "one self-contained, checkable statement"}]}';
+const COMMITTEE_VOTES_SHAPE = '{"votes": [{"claim": 1, "vote": "agree"}]}';
+/** Most claims kept from the merge — more would make every ballot a chore and the vote noisy. */
+const MAX_COMMITTEE_CLAIMS = 15;
+const COMMITTEE_VOTES: OrchestratorCommitteeVote[] = ['agree', 'disagree', 'unsure'];
+
+/**
+ * The message of a committee member's answer turn. The member is told it
+ * answers independently and will not see the others, works read-only, and
+ * should make concrete statements — they become the claims everyone votes on.
+ */
+export function buildCommitteeAnswerPrompt(task: string, textOnly: boolean, takenOver: boolean): string {
+  return [
+    'You are one of several AI backends asked the same question independently. You will not see the other answers, and they will not see yours; afterwards the answers are merged into a list of claims that every backend votes on.',
+    textOnly
+      ? 'You have no access to files or commands here: answer from the text in this message alone and say plainly what you cannot know without the project.'
+      : 'This is read-only: you may look at the project folder, but do not create, edit or delete any files and do not run commands that change anything.',
+    ...(takenOver ? ['Another backend began this answer and was cut off; start your own answer from scratch.'] : []),
+    '',
+    `Question or task:\n${task}`,
+    '',
+    'Give your full answer. Make concrete, checkable statements rather than general remarks, and say how sure you are where it matters.',
+  ].join('\n');
+}
+
+/**
+ * The orchestrator's request to merge the members' answers into one list of
+ * distinct claims. The answers are labelled A, B, C… without their backends,
+ * so the merge cannot lean towards its own backend's answer.
+ */
+export function buildCommitteeClaimsPrompt(task: string, answers: string[]): string {
+  const letters = answers.map((_answer, index) => String.fromCharCode(65 + index));
+  return [
+    'Several AI backends answered the same question independently. Merge their answers into one list of distinct claims for them to vote on.',
+    '',
+    `Question or task:\n${task}`,
+    '',
+    ...answers.flatMap((answer, index) => [`### Answer ${letters[index]}`, cutReport(answer) || '(empty)', '']),
+    `Rules: each claim is one self-contained statement that can be agreed or disagreed with on its own. Keep claims that only one answer makes. When answers contradict each other, list each side as its own claim. Merge claims that say the same thing. At most ${MAX_COMMITTEE_CLAIMS} claims, most important first.`,
+    '',
+    'Respond with ONLY a single fenced JSON code block and nothing else, in exactly this shape:',
+    '```json',
+    COMMITTEE_CLAIMS_SHAPE,
+    '```',
+  ].join('\n');
+}
+
+/** Parses the merged claims, numbering them from 1; throws `AppError` on any other shape (the caller asks once more). */
+export function parseCommitteeClaims(responseText: string): OrchestratorCommitteeClaim[] {
+  const raw = (parseJsonReply(responseText) as Record<string, unknown> | null)?.claims;
+  if (!Array.isArray(raw) || raw.length === 0) {
+    throw new AppError(`The reply had no "claims" list. Raw response:\n\n${responseText}`, {
+      code: 'ORCHESTRATOR_PLAN_PARSE_FAILED',
+      statusCode: 502,
+    });
+  }
+  const texts = raw.map((entry) => {
+    const text = typeof entry === 'string' ? entry : (entry as Record<string, unknown> | null)?.text;
+    return typeof text === 'string' ? text.trim() : '';
+  }).filter(Boolean);
+  if (texts.length === 0) {
+    throw new AppError(`Every claim was empty. Raw response:\n\n${responseText}`, {
+      code: 'ORCHESTRATOR_PLAN_PARSE_FAILED',
+      statusCode: 502,
+    });
+  }
+  return texts.slice(0, MAX_COMMITTEE_CLAIMS).map((text, index) => ({ id: index + 1, text, votes: {} }));
+}
+
+/** The message of a member's ballot turn: the numbered claims and the JSON vote it must answer with (`parseCommitteeVotes`). */
+export function buildCommitteeVotePrompt(task: string, claims: OrchestratorCommitteeClaim[], textOnly: boolean): string {
+  return [
+    'Several AI backends, you among them, answered the question below independently. Their answers were merged into the numbered claims below. Vote on every claim on its merits — whoever made it.',
+    textOnly
+      ? 'You have no access to files or commands here: judge from the text alone.'
+      : 'This is read-only: you may check claims against the project folder, but do not change anything.',
+    '',
+    `Question or task:\n${task}`,
+    '',
+    'Claims:',
+    ...claims.map((claim) => `${claim.id}. ${claim.text}`),
+    '',
+    'For each claim vote "agree", "disagree" or "unsure".',
+    'Respond with ONLY a single fenced JSON code block and nothing else, in exactly this shape, with one entry per claim:',
+    '```json',
+    COMMITTEE_VOTES_SHAPE,
+    '```',
+  ].join('\n');
+}
+
+/** The one follow-up a member gets when its ballot could not be read. */
+export function buildCommitteeVoteRetryPrompt(problem: string): string {
+  return [
+    `Your last reply could not be used: ${problem}`,
+    'Reply again with ONLY a single fenced JSON code block and nothing else, in exactly this shape, with one entry per claim:',
+    '```json',
+    COMMITTEE_VOTES_SHAPE,
+    '```',
+  ].join('\n');
+}
+
+/**
+ * Parses a member's ballot into claim id → vote. Entries for unknown claims
+ * are dropped and a claim without an entry stays unvoted. Throws `AppError`
+ * when there is no `votes` list or not a single usable entry.
+ */
+export function parseCommitteeVotes(responseText: string, claimIds: number[]): Map<number, OrchestratorCommitteeVote> {
+  const raw = (parseJsonReply(responseText) as Record<string, unknown> | null)?.votes;
+  const votes = new Map<number, OrchestratorCommitteeVote>();
+  if (Array.isArray(raw)) {
+    for (const entry of raw) {
+      const record = entry as Record<string, unknown> | null;
+      const claim = Number(record?.claim);
+      const vote = typeof record?.vote === 'string' ? record.vote.toLowerCase() : '';
+      if (claimIds.includes(claim) && (COMMITTEE_VOTES as string[]).includes(vote)) {
+        votes.set(claim, vote as OrchestratorCommitteeVote);
+      }
+    }
+  }
+  if (votes.size === 0) {
+    throw new AppError(`The ballot had no usable "votes". Raw response:\n\n${responseText}`, {
+      code: 'ORCHESTRATOR_PLAN_PARSE_FAILED',
+      statusCode: 502,
+    });
+  }
+  return votes;
+}
+
+/** Counts a claim's votes and names its outcome (see `OrchestratorClaimOutcome`); a claim nobody voted on is `disputed`. */
+export function tallyCommitteeClaim(claim: OrchestratorCommitteeClaim): { agree: number; disagree: number; unsure: number; outcome: OrchestratorClaimOutcome } {
+  const ballots = Object.values(claim.votes);
+  const agree = ballots.filter((vote) => vote === 'agree').length;
+  const disagree = ballots.filter((vote) => vote === 'disagree').length;
+  const unsure = ballots.length - agree - disagree;
+  const outcome: OrchestratorClaimOutcome = ballots.length > 0 && agree === ballots.length
+    ? 'consensus'
+    : agree * 2 > ballots.length ? 'majority' : disagree * 2 > ballots.length ? 'rejected' : 'disputed';
+  return { agree, disagree, unsure, outcome };
+}
+
+/**
+ * The orchestrator's closing request: the claims with their tallies, to be
+ * turned into a plain-text answer for the user that says what everyone
+ * agreed on, what most agreed on, and what stays disputed.
+ */
+export function buildCommitteeSummaryPrompt(task: string, claims: OrchestratorCommitteeClaim[], members: number): string {
+  return [
+    `${members} AI backends answered the question below independently, their answers were merged into claims, and every backend voted on each claim.`,
+    '',
+    `Question or task:\n${task}`,
+    '',
+    'Claims with votes (agree / disagree / unsure) and outcome:',
+    ...claims.map((claim) => {
+      const tally = tallyCommitteeClaim(claim);
+      return `${claim.id}. ${claim.text} — ${tally.agree}/${tally.disagree}/${tally.unsure}, ${tally.outcome}`;
+    }),
+    '',
+    'Write the final answer for the user in plain text (no JSON): the answer to the question built on what was agreed, then what the backends disagree about and why it matters. Do not present a disputed or rejected claim as fact.',
+  ].join('\n');
 }
 
 /**

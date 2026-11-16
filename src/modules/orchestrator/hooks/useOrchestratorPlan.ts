@@ -20,10 +20,20 @@ export type OrchestratorSubtaskResult = {
   movedFrom?: LLMProvider[];
   /** Set only in a pair run: the writer's or the reviewer's turn. */
   pairPart?: 'writer' | 'reviewer';
+  /** Set only in a committee run: a member's blind answer or its ballot. */
+  committeePart?: 'answer' | 'vote';
 };
 
-/** How a run works: `plan` splits the task into subtasks, `pair` runs a writer and a read-only reviewer in turns. */
-export type OrchestratorRunMode = 'plan' | 'pair';
+/** How a run works: `plan` splits the task into subtasks, `pair` runs a writer and a read-only reviewer in turns, `committee` has several backends answer blind and vote. */
+export type OrchestratorRunMode = 'plan' | 'pair' | 'committee';
+
+/** One merged claim of a committee run with each member's vote (mirrors the server's `OrchestratorCommitteeClaim`). */
+type OrchestratorCommitteeClaim = {
+  id: number;
+  text: string;
+  votes: Partial<Record<LLMProvider, 'agree' | 'disagree' | 'unsure'>>;
+  outcome?: 'consensus' | 'majority' | 'rejected' | 'disputed';
+};
 
 /** One reviewer finding of a pair run (mirrors the server's `OrchestratorReviewFinding`). */
 type OrchestratorReviewFinding = { severity: 'P0' | 'P1' | 'P2'; text: string };
@@ -56,6 +66,12 @@ export type OrchestratorRun = {
   pairRounds?: OrchestratorPairRound[];
   /** How a finished pair run ended: approved, or out of rounds with findings open. */
   pairOutcome?: 'approved' | 'rounds';
+  /** A committee run's members, stage and claims (mirrors the server's `OrchestratorCommittee`). */
+  committee?: {
+    members: LLMProvider[];
+    stage: 'answers' | 'claims' | 'votes' | 'summary';
+    claims?: OrchestratorCommitteeClaim[];
+  };
   waitingFor?: LLMProvider;
   resumeAt?: string;
   summary?: string;

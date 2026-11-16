@@ -7,6 +7,9 @@ import {
   buildSubtaskPrompt,
   buildSubtaskTurnOptions,
   findRepeatedPairFindings,
+  parseCommitteeClaims,
+  parseCommitteeVotes,
+  tallyCommitteeClaim,
   groupSubtasksIntoSteps,
   parseOrchestratorReview,
   parsePairReview,
@@ -211,4 +214,27 @@ test('findRepeatedPairFindings matches open findings by text only, ignoring P2 a
   assert.equal(findRepeatedPairFindings(previous, { verdict: 'changes', findings: [{ severity: 'P2', text: 'No input check.' }] }).length, 0);
   assert.equal(findRepeatedPairFindings(previous, { verdict: 'changes', findings: [{ severity: 'P1', text: 'Naming' }] }).length, 0);
   assert.equal(findRepeatedPairFindings(previous, { verdict: 'approved', findings: [] }).length, 0);
+});
+
+test('parseCommitteeClaims numbers non-empty claims from 1 and rejects an empty list', () => {
+  assert.deepEqual(parseCommitteeClaims('{"claims":[{"text":" A "},{"text":""},"B"]}'), [
+    { id: 1, text: 'A', votes: {} },
+    { id: 2, text: 'B', votes: {} },
+  ]);
+  assert.throws(() => parseCommitteeClaims('{"claims":[]}'), /"claims"/);
+});
+
+test('parseCommitteeVotes keeps valid votes on known claims only', () => {
+  const votes = parseCommitteeVotes('{"votes":[{"claim":1,"vote":"AGREE"},{"claim":9,"vote":"agree"},{"claim":2,"vote":"maybe"}]}', [1, 2]);
+  assert.deepEqual([...votes], [[1, 'agree']]);
+  assert.throws(() => parseCommitteeVotes('{"votes":[]}', [1]), /usable/);
+});
+
+test('tallyCommitteeClaim names consensus, majority, rejected and disputed', () => {
+  const outcome = (votes: Record<string, 'agree' | 'disagree' | 'unsure'>) => tallyCommitteeClaim({ id: 1, text: 'x', votes }).outcome;
+  assert.equal(outcome({ claude: 'agree', codex: 'agree' }), 'consensus');
+  assert.equal(outcome({ claude: 'agree', codex: 'agree', openrouter: 'disagree' }), 'majority');
+  assert.equal(outcome({ claude: 'disagree', codex: 'disagree', openrouter: 'agree' }), 'rejected');
+  assert.equal(outcome({ claude: 'agree', codex: 'disagree' }), 'disputed');
+  assert.equal(outcome({}), 'disputed');
 });

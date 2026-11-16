@@ -578,3 +578,89 @@ test('a subtask whose backend cannot work at all fails with the reason instead o
     assert.match(final.subtasks[0].error ?? '', /codex cannot work: it is not signed in.*refresh token has expired/);
   });
 });
+
+// ---------------------------
+// Committee mode: blind answers, merged claims, a vote on each, a summary.
+
+const startCommittee = (dependencies: OrchestratorRunDependencies, providerRoles: Record<string, string> = ROLES) => startOrchestratorRun(
+  { orchestratorSessionId: 'lead', userId: 1, task: 'Which cache should we use?', providerRoles: providerRoles as typeof ROLES, mode: 'committee' },
+  dependencies,
+);
+const isBallot = (turn: Turn) => /Vote on every claim/.test(turn.content);
+const ballot = (...votes: string[]) => json({ votes: votes.map((vote, index) => ({ claim: index + 1, vote })) });
+const CLAIMS = json({ claims: [{ text: 'Redis fits' }, { text: 'Memcached is enough' }] });
+
+test('committee: every member answers blind and read-only, votes on the merged claims, and the orchestrator sums up', async () => {
+  const ballots: Record<string, string> = { claude: ballot('agree', 'disagree'), codex: ballot('agree', 'agree'), openrouter: ballot('agree', 'unsure') };
+  await withOrchestrator([CLAIMS, 'Use Redis; Memcached is disputed.'], async ({ turns, dependencies }) => {
+    const { run, finished } = startCommittee(dependencies);
+    assert.deepEqual(run.committee?.members, ['claude', 'codex', 'openrouter']);
+    await finished;
+
+    const final = getOrchestratorRun(run.id)!;
+    assert.equal(final.phase, 'done');
+    assert.equal(final.summary, 'Use Redis; Memcached is disputed.');
+    assert.equal(final.committee?.stage, 'summary');
+    assert.deepEqual(final.committee?.claims?.map((claim) => [claim.text, claim.outcome]), [['Redis fits', 'consensus'], ['Memcached is enough', 'disputed']]);
+    assert.deepEqual(final.committee?.claims?.[1].votes, { claude: 'disagree', codex: 'agree', openrouter: 'unsure' });
+
+    const answers = turns.filter((turn) => /asked the same question independently/.test(turn.content));
+    assert.deepEqual(answers.map((turn) => turn.provider).sort(), ['claude', 'codex', 'openrouter']);
+    for (const answer of answers) {
+      assert.deepEqual(answer.options, buildSubtaskTurnOptions(answer.provider as 'claude', 'read'));
+    }
+    // The merge gets the answers unnamed.
+    const merge = turns.filter((turn) => turn.sessionId === 'lead')[0].content;
+    assert.match(merge, /### Answer A/);
+    assert.match(merge, /### Answer C/);
+    assert.doesNotMatch(merge, /codex|openrouter/i);
+    // The summary gets the tallies.
+    assert.match(turns.filter((turn) => turn.sessionId === 'lead')[1].content, /Redis fits — 3\/0\/0, consensus/);
+  }, (turn) => (isBallot(turn) ? ballots[turn.provider] : `Answer ${{ claude: 1, codex: 2, openrouter: 3 }[turn.provider]}: Redis`));
+});
+
+test('committee: a member whose ballot stays unreadable is left out of the tally instead of failing the run', async () => {
+  await withOrchestrator([CLAIMS, 'Summary.'], async ({ dependencies }) => {
+    const { run, finished } = startCommittee(dependencies, { claude: 'orchestrator', codex: 'hands' });
+    await finished;
+    const final = getOrchestratorRun(run.id)!;
+    assert.equal(final.phase, 'done');
+    assert.deepEqual(final.committee?.claims?.[0].votes, { claude: 'agree' });
+    const codexBallot = final.subtasks.find((subtask) => subtask.committeePart === 'vote' && subtask.provider === 'codex')!;
+    assert.equal(codexBallot.status, 'failed');
+  }, (turn) => {
+    if (turn.provider === 'codex' && (isBallot(turn) || /could not be used/.test(turn.content))) {
+      return 'I agree with most of it.';
+    }
+    return isBallot(turn) ? ballot('agree', 'agree') : 'answer';
+  });
+});
+
+test('committee: fewer than two answers fail the run, and continuing asks only the missing member again', async () => {
+  let codexWorks = false;
+  await withOrchestrator([CLAIMS, 'Summary.'], async ({ turns, dependencies }) => {
+    const { run, finished } = startCommittee(dependencies, { claude: 'orchestrator', codex: 'hands' });
+    await finished;
+    const failed = getOrchestratorRun(run.id)!;
+    assert.equal(failed.phase, 'failed');
+    assert.match(failed.error ?? '', /Fewer than two/);
+
+    codexWorks = true;
+    await resumeOrchestratorRun(run.id, dependencies)!.finished;
+    assert.equal(getOrchestratorRun(run.id)!.phase, 'done');
+    const claudeAnswers = turns.filter((turn) => turn.provider === 'claude' && turn.sessionId !== 'lead' && !isBallot(turn));
+    assert.equal(claudeAnswers.length, 1);
+  }, (turn) => {
+    if (turn.provider === 'codex' && !codexWorks) {
+      return null;
+    }
+    return isBallot(turn) ? ballot('agree', 'agree') : 'answer';
+  });
+});
+
+test('committee: a single free backend is refused at the start', async () => {
+  await withOrchestrator([], async ({ dependencies, limits }) => {
+    limits.set('codex', Date.now() + 3_600_000);
+    assert.throws(() => startCommittee(dependencies, { claude: 'orchestrator', codex: 'hands' }), /at least two backends/);
+  });
+});

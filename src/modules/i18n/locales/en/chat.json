@@ -560,7 +560,8 @@
       "mode": "Mode",
       "modes": {
         "plan": "Plan",
-        "pair": "Pair (writer + reviewer)"
+        "pair": "Pair (writer + reviewer)",
+        "committee": "Committee (answers + vote)"
       },
       "pairDescription": "A writer (the \"hands\" backend, can edit) does the task; another backend reviews each round read-only and lists findings. The writer fixes P0/P1 findings until it says the work is done and nothing serious is open.",
       "pairPhase": {
@@ -580,7 +581,28 @@
         "outcomeRounds": "The rounds ran out with findings still open — see the last round."
       },
       "pausedDecision": "The reviewer raised the same serious finding two rounds in a row. Your decision is needed: press \"Continue now\" for another round (the writer is told to fix it differently or explain why it stays), or \"Stop\".",
-      "notPassedOn": "It was not passed to another backend: fix this, then continue the task."
+      "notPassedOn": "It was not passed to another backend: fix this, then continue the task.",
+      "committeeDescription": "Every backend with a role answers the task on its own, read-only, without seeing the others. This session merges the answers into claims, every backend votes on each claim, and this session sums up what was agreed and what is disputed.",
+      "committeeStage": {
+        "answers": "The members are answering independently…",
+        "claims": "Merging the answers into claims…",
+        "votes": "The members are voting on the claims…",
+        "summary": "Summing up the vote…"
+      },
+      "committee": {
+        "answer": "answer",
+        "vote": "vote",
+        "answers": "Independent answers",
+        "votes": "Vote",
+        "claims": "Claims",
+        "tallyHint": "agree / disagree / unsure",
+        "outcome": {
+          "consensus": "all agree",
+          "majority": "majority",
+          "rejected": "rejected",
+          "disputed": "disputed"
+        }
+      }
     },
     "switchBackend": {
       "label": "Switch backend",

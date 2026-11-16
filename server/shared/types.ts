@@ -2063,6 +2063,8 @@ export type OrchestratorSubtaskResult = {
   movedFrom?: LLMProvider[];
   /** Set only in a pair run: whether this turn was the writer's or the reviewer's. */
   pairPart?: 'writer' | 'reviewer';
+  /** Set only in a committee run: a member's blind answer or its ballot on the merged claims. */
+  committeePart?: 'answer' | 'vote';
 };
 
 /**
@@ -2070,9 +2072,41 @@ export type OrchestratorSubtaskResult = {
  * and reviews their reports round by round. `pair`: one writer (the `hands`
  * chain, full access) and one reviewer (another backend, the `orchestrator`
  * chain first, read-only) take turns until the writer says it is done and the
- * reviewer has no open P0/P1 finding. A run saved without `mode` is `plan`.
+ * reviewer has no open P0/P1 finding. `committee`: every backend holding a
+ * role answers the task blind and read-only, the orchestrator merges the
+ * answers into claims, every member votes on each claim, and the
+ * orchestrator sums it up. A run saved without `mode` is `plan`.
  */
-export type OrchestratorRunMode = 'plan' | 'pair';
+export type OrchestratorRunMode = 'plan' | 'pair' | 'committee';
+
+/** One committee member's ballot on one claim. */
+export type OrchestratorCommitteeVote = 'agree' | 'disagree' | 'unsure';
+
+/**
+ * How a claim came out of the vote, among the members that cast a ballot:
+ * `consensus` every one agreed, `majority` more than half agreed,
+ * `rejected` more than half disagreed, `disputed` anything else.
+ */
+export type OrchestratorClaimOutcome = 'consensus' | 'majority' | 'rejected' | 'disputed';
+
+/** One statement merged from the members' answers, with each member's vote and, once voting is over, its outcome. */
+export type OrchestratorCommitteeClaim = {
+  id: number;
+  text: string;
+  votes: Partial<Record<LLMProvider, OrchestratorCommitteeVote>>;
+  outcome?: OrchestratorClaimOutcome;
+};
+
+/**
+ * A committee run's public state: who sits on it (fixed at start: every
+ * backend holding a role and free at that moment), which stage it is in,
+ * and the merged claims once the orchestrator has written them.
+ */
+export type OrchestratorCommittee = {
+  members: LLMProvider[];
+  stage: 'answers' | 'claims' | 'votes' | 'summary';
+  claims?: OrchestratorCommitteeClaim[];
+};
 
 /** How serious a reviewer's finding is: `P0`/`P1` must be fixed before a pair run can close, `P2` is advice. */
 export type OrchestratorFindingSeverity = 'P0' | 'P1' | 'P2';
@@ -2138,6 +2172,8 @@ export type OrchestratorRun = {
   pairRounds?: OrchestratorPairRound[];
   /** How a finished pair run ended: the reviewer approved finished work, or the rounds ran out with findings still open. */
   pairOutcome?: 'approved' | 'rounds';
+  /** A committee run's members, stage and claims. */
+  committee?: OrchestratorCommittee;
   /** The backend the task waits for while paused on a limit. */
   waitingFor?: LLMProvider;
   /** When a limit pause ends by itself (ISO). */

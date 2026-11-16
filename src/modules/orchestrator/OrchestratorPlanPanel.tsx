@@ -7,8 +7,20 @@ import { LLM_PROVIDER_NAMES } from '@/shared/constants';
 import { cn } from '@/shared/utils';
 
 /** Rounds the user may pick per mode, and what is preselected — they match the server's limits and defaults. */
-const ROUND_OPTIONS: Record<OrchestratorRunMode, number[]> = { plan: [1, 2, 3, 4], pair: [1, 2, 3, 4, 5] };
-const DEFAULT_ROUNDS: Record<OrchestratorRunMode, number> = { plan: 2, pair: 3 };
+const ROUND_OPTIONS: Record<OrchestratorRunMode, number[]> = { plan: [1, 2, 3, 4], pair: [1, 2, 3, 4, 5], committee: [] };
+const DEFAULT_ROUNDS: Record<OrchestratorRunMode, number> = { plan: 2, pair: 3, committee: 2 };
+const MODE_DESCRIPTION_KEY: Record<OrchestratorRunMode, string> = {
+  plan: 'backendTools.orchestrator.description',
+  pair: 'backendTools.orchestrator.pairDescription',
+  committee: 'backendTools.orchestrator.committeeDescription',
+};
+
+const OUTCOME_STYLE: Record<'consensus' | 'majority' | 'rejected' | 'disputed', string> = {
+  consensus: 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400',
+  majority: 'bg-sky-500/15 text-sky-700 dark:text-sky-400',
+  rejected: 'bg-red-500/15 text-red-600 dark:text-red-400',
+  disputed: 'bg-amber-500/15 text-amber-700 dark:text-amber-400',
+};
 
 const SEVERITY_STYLE: Record<'P0' | 'P1' | 'P2', string> = {
   P0: 'bg-red-500/15 text-red-600 dark:text-red-400',
@@ -33,7 +45,9 @@ const STATUS_DOT: Record<OrchestratorSubtaskResult['status'], string> = {
  * stopped too); a run paused on a usage limit shows when it goes on and can
  * be continued at once, as can one that failed or was cut off by a restart.
  * In pair mode the panel shows each round's writer and reviewer turns, the
- * reviewer's verdict and findings, and how the run ended. Rendered by the chat
+ * reviewer's verdict and findings, and how the run ended. In committee mode
+ * it shows each member's answer and ballot turn, then every merged claim
+ * with its votes and outcome. Rendered by the chat
  * module as one of the tools under the composer, only when the current
  * session's provider has the orchestrator role.
  */
@@ -57,14 +71,18 @@ export function OrchestratorPlanPanel({
   const coordinatorMoved = Boolean(run?.coordinatorSessionId && run.coordinatorSessionId !== run.orchestratorSessionId);
   const rounds = run ? [...new Set(run.subtasks.map((subtask) => subtask.round))] : [];
   const isPairRun = run?.mode === 'pair';
-  const phaseKey = isPairRun && (run.phase === 'running' || run.phase === 'reviewing')
-    ? `backendTools.orchestrator.pairPhase.${run.phase}`
-    : `backendTools.orchestrator.phase.${run?.phase}`;
+  const committee = run?.mode === 'committee' ? run.committee : undefined;
+  const isWorking = run?.phase === 'running' || run?.phase === 'reviewing';
+  const phaseKey = committee && isWorking
+    ? `backendTools.orchestrator.committeeStage.${committee.stage}`
+    : isPairRun && isWorking
+      ? `backendTools.orchestrator.pairPhase.${run.phase}`
+      : `backendTools.orchestrator.phase.${run?.phase}`;
 
   return (
     <div className="orchestrator-plan-panel flex flex-col gap-2 rounded-md border border-border p-3">
       <p className="text-sm text-muted-foreground">
-        {t(mode === 'pair' ? 'backendTools.orchestrator.pairDescription' : 'backendTools.orchestrator.description')}
+        {t(MODE_DESCRIPTION_KEY[mode])}
       </p>
       <textarea
         value={task}
@@ -87,9 +105,10 @@ export function OrchestratorPlanPanel({
           >
             <option value="plan">{t('backendTools.orchestrator.modes.plan')}</option>
             <option value="pair">{t('backendTools.orchestrator.modes.pair')}</option>
+            <option value="committee">{t('backendTools.orchestrator.modes.committee')}</option>
           </select>
         </label>
-        <label className="flex items-center gap-2 text-sm text-muted-foreground">
+        <label className={cn('flex items-center gap-2 text-sm text-muted-foreground', mode === 'committee' && 'hidden')}>
           {t('backendTools.orchestrator.rounds')}
           <select
             value={maxRounds}
@@ -164,7 +183,9 @@ export function OrchestratorPlanPanel({
             <div key={round} className="flex flex-col gap-1">
               {run.maxRounds > 1 ? (
                 <p className="text-xs uppercase tracking-wide text-muted-foreground">
-                  {t('backendTools.orchestrator.round', { round })}
+                  {committee
+                    ? t(round === 1 ? 'backendTools.orchestrator.committee.answers' : 'backendTools.orchestrator.committee.votes')
+                    : t('backendTools.orchestrator.round', { round })}
                 </p>
               ) : null}
               <ul className="flex flex-col gap-1">
@@ -175,7 +196,9 @@ export function OrchestratorPlanPanel({
                       <span>
                         <strong>{subtask.title}</strong>
                         {' — '}
-                        {subtask.pairPart
+                        {subtask.committeePart
+                          ? t(`backendTools.orchestrator.committee.${subtask.committeePart}`)
+                          : subtask.pairPart
                           ? t(`backendTools.orchestrator.pair.${subtask.pairPart}`)
                           : t(`backendTools.orchestrator.roles.${subtask.role}`)}
                         {', '}
@@ -213,6 +236,7 @@ export function OrchestratorPlanPanel({
               {isPairRun ? <PairRoundVerdict round={run.pairRounds?.find((entry) => entry.round === round)} /> : null}
             </div>
           ))}
+          {committee?.claims?.length ? <CommitteeClaims claims={committee.claims} /> : null}
           {isPairRun && run.phase === 'done' && run.pairOutcome ? (
             <p className="font-medium">
               {t(run.pairOutcome === 'approved' ? 'backendTools.orchestrator.pair.outcomeApproved' : 'backendTools.orchestrator.pair.outcomeRounds')}
@@ -252,6 +276,36 @@ function PairRoundVerdict({ round }: { round: NonNullable<OrchestratorRun['pairR
           ))}
         </ul>
       ) : null}
+    </div>
+  );
+}
+
+/** The merged claims of a committee run, each with its vote count and, once voting is over, its outcome. */
+function CommitteeClaims({ claims }: { claims: NonNullable<NonNullable<OrchestratorRun['committee']>['claims']> }) {
+  const { t } = useTranslation('chat');
+  return (
+    <div className="flex flex-col gap-1">
+      <p className="text-xs uppercase tracking-wide text-muted-foreground">{t('backendTools.orchestrator.committee.claims')}</p>
+      <ol className="flex flex-col gap-1">
+        {claims.map((claim) => {
+          const ballots = Object.values(claim.votes);
+          const count = (vote: string) => ballots.filter((entry) => entry === vote).length;
+          return (
+            <li key={claim.id} className="flex items-start gap-2">
+              <span className="shrink-0 text-muted-foreground">{claim.id}.</span>
+              <span className="flex-1">{claim.text}</span>
+              <span className="shrink-0 text-xs text-muted-foreground" title={t('backendTools.orchestrator.committee.tallyHint')}>
+                {`✓${count('agree')} ✗${count('disagree')} ?${count('unsure')}`}
+              </span>
+              {claim.outcome ? (
+                <span className={cn('shrink-0 rounded px-1 text-xs font-semibold', OUTCOME_STYLE[claim.outcome])}>
+                  {t(`backendTools.orchestrator.committee.outcome.${claim.outcome}`)}
+                </span>
+              ) : null}
+            </li>
+          );
+        })}
+      </ol>
     </div>
   );
 }

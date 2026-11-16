@@ -3,6 +3,11 @@ import { randomUUID } from 'node:crypto';
 import { orchestratorRunsDb, sessionsDb } from '@/modules/database/index.js';
 import { getProviderLimitedUntil } from '@/modules/handoff/index.js';
 import {
+  buildCommitteeAnswerPrompt,
+  buildCommitteeClaimsPrompt,
+  buildCommitteeSummaryPrompt,
+  buildCommitteeVotePrompt,
+  buildCommitteeVoteRetryPrompt,
   buildCoordinatorTakeoverNote,
   buildPairReviewPrompt,
   buildPairReviewRetryPrompt,
@@ -18,10 +23,13 @@ import {
   listOpenPairFindings,
   listRoleCandidates,
   parseOrchestratorPlan,
+  parseCommitteeClaims,
+  parseCommitteeVotes,
   parseOrchestratorReview,
   parsePairReview,
   parsePairWriterDone,
   stripPairWriterStatus,
+  tallyCommitteeClaim,
 } from '@/modules/orchestrator/services/orchestrator-plan.service.js';
 import type { OrchestratorReview, PairReview, SubtaskReport } from '@/modules/orchestrator/services/orchestrator-plan.service.js';
 import { sessionsService } from '@/modules/providers/index.js';
@@ -30,6 +38,7 @@ import { chatRunRegistry, runDetachedChatTurn } from '@/modules/websocket/index.
 import { AppError } from '@/shared/utils.js';
 import type {
   LLMProvider,
+  OrchestratorCommitteeVote,
   OrchestratorPairRound,
   OrchestratorRun,
   OrchestratorRunMode,
@@ -115,6 +124,8 @@ type RunState = {
   coordinatorSessions: Partial<Record<LLMProvider, string>>;
   /** Pair runs only: the writer's report of each round (index = round - 1), kept for the reviewer and the next writer turn. */
   pairWriterReports?: string[];
+  /** Committee runs only: each member's blind answer (same index as `run.committee.members`; null: none yet). */
+  committeeAnswers?: Array<string | null>;
 };
 
 /** What exists only while the process lives: the stop flag, the turns going now, and how to end a pause early. */
@@ -196,6 +207,13 @@ function ensureRestored(): void {
 
 function snapshot(run: OrchestratorRun): OrchestratorRun {
   const copy: OrchestratorRun = { ...run, subtasks: run.subtasks.map((subtask) => ({ ...subtask })) };
+  if (run.committee) {
+    copy.committee = {
+      ...run.committee,
+      members: [...run.committee.members],
+      ...(run.committee.claims ? { claims: run.committee.claims.map((claim) => ({ ...claim, votes: { ...claim.votes } })) } : {}),
+    };
+  }
   if (run.pairRounds) {
     copy.pairRounds = run.pairRounds.map((round) => ({ ...round, findings: round.findings.map((finding) => ({ ...finding })) }));
   }
@@ -434,7 +452,7 @@ async function askCoordinator<T>(
   state: RunState,
   prompt: string,
   parse: (reply: string) => T,
-  shape: 'plan' | 'review',
+  shape: 'plan' | 'review' | 'claims',
   dependencies: OrchestratorRunDependencies,
 ): Promise<T> {
   const phase = shape === 'plan' ? 'planning' : 'reviewing';
@@ -804,6 +822,191 @@ async function executePairRun(state: RunState, dependencies: OrchestratorRunDepe
   }
 }
 
+// ---------------------------
+// Committee mode.
+
+/**
+ * Who sits on a committee: every backend the user gave any role, the
+ * orchestrator role first and then by their own order, leaving out those at
+ * their usage limit right now — a member that is out at the start would
+ * only hold the whole committee up. Text-only backends sit too: they answer
+ * and vote from text.
+ */
+function chooseCommitteeMembers(
+  providerRoles: Partial<Record<LLMProvider, ProviderRole>>,
+  preferredOrder: LLMProvider[],
+  limitedUntil: (provider: LLMProvider) => number | null,
+): LLMProvider[] {
+  const everyone = (['orchestrator', 'hands', 'routine'] as const).flatMap((role) => listRoleCandidates(role, providerRoles, preferredOrder)
+    .filter((provider) => providerRoles[provider] === role));
+  return [...new Set(everyone)].filter((provider) => limitedUntil(provider) === null);
+}
+
+function committeeEntry(state: RunState, provider: LLMProvider, part: 'answer' | 'vote'): OrchestratorSubtaskResult {
+  let entry = state.run.subtasks.find((subtask) => subtask.committeePart === part && subtask.title.endsWith(`— ${provider}`));
+  if (!entry) {
+    entry = {
+      title: `${part === 'answer' ? 'Answer' : 'Vote'} — ${provider}`,
+      role: state.providerRoles[provider] ?? 'routine',
+      access: 'read',
+      round: part === 'answer' ? 1 : 2,
+      status: 'pending',
+      committeePart: part,
+    };
+    state.run.subtasks.push(entry);
+  }
+  return entry;
+}
+
+/** Reads a member's ballot, asking its session once more when it does not parse; a second miss counts as no ballot. */
+async function readCommitteeBallot(
+  state: RunState,
+  entry: OrchestratorSubtaskResult,
+  firstReply: string,
+  claimIds: number[],
+  dependencies: OrchestratorRunDependencies,
+): Promise<Map<number, OrchestratorCommitteeVote> | null> {
+  try {
+    return parseCommitteeVotes(firstReply, claimIds);
+  } catch (error) {
+    const problem = error instanceof Error ? error.message.split('\n')[0] : 'it was not in the required format.';
+    const turn = await runTrackedTurn(state, {
+      sessionId: entry.sessionId!,
+      content: buildCommitteeVoteRetryPrompt(problem),
+      options: buildSubtaskTurnOptions(entry.provider!, 'read'),
+    }, dependencies);
+    throwIfStopped(state);
+    const secondReply = turn.started ? await dependencies.readLastReply(entry.sessionId!) : null;
+    try {
+      return parseCommitteeVotes(secondReply ?? '', claimIds);
+    } catch {
+      return null;
+    }
+  }
+}
+
+/**
+ * The life of a committee run, entered again on resume like `executeRun`.
+ * Every member answers the task blind and read-only, side by side; the
+ * orchestrator (its chain, as for planning) merges the answers, unnamed,
+ * into claims; every member that answered votes on each claim; the
+ * orchestrator writes the closing answer from the tallies. Each answer,
+ * the claims and each ballot are saved the moment they exist, so a resume
+ * redoes only what is missing. A member's turn goes only to that member —
+ * a stand-in would be a second vote of the same backend — so a member at
+ * its limit pauses the run until it resets, as any role chain does. Fewer
+ * than two answers fail the run: there is nothing to compare.
+ */
+async function executeCommitteeRun(state: RunState, dependencies: OrchestratorRunDependencies): Promise<void> {
+  const { run } = state;
+  const committee = run.committee!;
+  const answers = state.committeeAnswers ?? committee.members.map(() => null);
+  state.committeeAnswers = answers;
+
+  if (committee.stage === 'answers') {
+    run.phase = 'running';
+    run.round = 1;
+    save(state);
+    await Promise.all(committee.members.map(async (provider, index) => {
+      if (answers[index] !== null) {
+        return;
+      }
+      const entry = committeeEntry(state, provider, 'answer');
+      const report = await runDelegatedTurn(state, entry, {
+        title: entry.title,
+        access: 'read',
+        candidates: [provider],
+        noCandidatesError: 'This member cannot answer.',
+        buildContent: (member, takenOver) => buildCommitteeAnswerPrompt(run.task, isTextOnlyProvider(member), takenOver),
+      }, dependencies);
+      if (report.status === 'done') {
+        answers[index] = report.result;
+      }
+      save(state);
+    }));
+    throwIfStopped(state);
+    if (answers.filter((answer) => answer !== null).length < 2) {
+      throw new AppError('Fewer than two committee members answered, so there is nothing to compare. The members\' sessions show why; continue the task to ask the missing ones again.', {
+        code: 'ORCHESTRATOR_COMMITTEE_TOO_FEW_ANSWERS',
+        statusCode: 502,
+      });
+    }
+    committee.stage = 'claims';
+    save(state);
+  }
+
+  if (committee.stage === 'claims') {
+    run.phase = 'reviewing';
+    save(state);
+    const given = answers.filter((answer): answer is string => answer !== null);
+    committee.claims = await askCoordinator(state, buildCommitteeClaimsPrompt(run.task, given), parseCommitteeClaims, 'claims', dependencies);
+    committee.stage = 'votes';
+    save(state);
+  }
+
+  if (committee.stage === 'votes') {
+    run.phase = 'running';
+    run.round = 2;
+    save(state);
+    const claims = committee.claims ?? [];
+    const claimIds = claims.map((claim) => claim.id);
+    await Promise.all(committee.members.map(async (provider, index) => {
+      if (answers[index] === null) {
+        return;
+      }
+      const entry = committeeEntry(state, provider, 'vote');
+      // A ballot that came in or failed for good is not cast again on resume.
+      if (entry.status === 'done' || entry.status === 'failed' || entry.status === 'skipped') {
+        return;
+      }
+      const report = await runDelegatedTurn(state, entry, {
+        title: entry.title,
+        access: 'read',
+        candidates: [provider],
+        noCandidatesError: 'This member cannot vote.',
+        buildContent: (member) => buildCommitteeVotePrompt(run.task, claims, isTextOnlyProvider(member)),
+      }, dependencies);
+      if (report.status === 'done') {
+        const ballot = await readCommitteeBallot(state, entry, report.result, claimIds, dependencies);
+        if (ballot) {
+          for (const claim of claims) {
+            const vote = ballot.get(claim.id);
+            if (vote) {
+              claim.votes[provider] = vote;
+            }
+          }
+        } else {
+          entry.status = 'failed';
+          entry.error = 'The ballot could not be read.';
+        }
+      }
+      save(state);
+    }));
+    throwIfStopped(state);
+    for (const claim of claims) {
+      claim.outcome = tallyCommitteeClaim(claim).outcome;
+    }
+    committee.stage = 'summary';
+    save(state);
+  }
+
+  run.phase = 'reviewing';
+  save(state);
+  const claims = committee.claims ?? [];
+  const voters = committee.members.filter((_provider, index) => answers[index] !== null).length;
+  try {
+    run.summary = await askCoordinator(state, buildCommitteeSummaryPrompt(run.task, claims, voters), (reply) => reply.trim(), 'review', dependencies);
+  } catch (error) {
+    if (error instanceof RunStopped) {
+      throw error;
+    }
+    // The vote stands on its own; the panel shows every claim with its outcome.
+    run.summary = '';
+  }
+  run.phase = 'done';
+  save(state);
+}
+
 /**
  * The whole life of one run after its request has been accepted; never
  * throws — a failure ends up on the run itself. Written to be entered
@@ -818,6 +1021,10 @@ async function executeRun(state: RunState, dependencies: OrchestratorRunDependen
   try {
     if (run.mode === 'pair') {
       await executePairRun(state, dependencies);
+      return;
+    }
+    if (run.mode === 'committee') {
+      await executeCommitteeRun(state, dependencies);
       return;
     }
     if (!state.plan) {
@@ -930,7 +1137,7 @@ export function resumeOrchestratorRun(
     delete state.run.pauseReason;
     delete state.run.resumeAt;
     delete state.run.waitingFor;
-    state.run.phase = state.plan || state.run.mode === 'pair' ? 'running' : 'planning';
+    state.run.phase = state.plan || state.run.mode === 'pair' || state.run.mode === 'committee' ? 'running' : 'planning';
     finished = executeRun(state, dependencies);
   }
   return { run: snapshot(state.run), finished };
@@ -970,6 +1177,10 @@ export function restoreOrchestratorRuns(dependencies: OrchestratorRunDependencie
  * With `mode: 'pair'` there is no plan: a writer (the `hands` chain) and a
  * read-only reviewer (another backend, the `orchestrator` chain first) take
  * turns on the whole task — see `executePairRun`.
+ *
+ * With `mode: 'committee'` every backend holding a role answers blind, the
+ * orchestrator merges the answers into claims, all vote on each claim and
+ * the orchestrator sums it up — see `executeCommitteeRun`.
  *
  * Progress is read back with `getOrchestratorRun`; nothing here waits for
  * the run to finish. A backend never starts subtasks of its own: delegation
@@ -1017,7 +1228,16 @@ export function startOrchestratorRun(
     }
   }
 
-  const mode: OrchestratorRunMode = input.mode === 'pair' ? 'pair' : 'plan';
+  const mode: OrchestratorRunMode = input.mode === 'pair' || input.mode === 'committee' ? input.mode : 'plan';
+  const committeeMembers = mode === 'committee'
+    ? chooseCommitteeMembers(input.providerRoles, input.preferredOrder ?? [], dependencies.limitedUntil)
+    : [];
+  if (mode === 'committee' && committeeMembers.length < 2) {
+    throw new AppError(
+      'A committee needs at least two backends with a role that are not at their usage limit. Assign roles to more backends in settings, or wait for a limit to reset.',
+      { code: 'ORCHESTRATOR_COMMITTEE_TOO_FEW_MEMBERS', statusCode: 409 },
+    );
+  }
   const roundsLimit = mode === 'pair' ? PAIR_MAX_ROUNDS_LIMIT : ORCHESTRATOR_MAX_ROUNDS_LIMIT;
   const defaultRounds = mode === 'pair' ? DEFAULT_PAIR_MAX_ROUNDS : DEFAULT_ORCHESTRATOR_MAX_ROUNDS;
   const state: RunState = {
@@ -1026,11 +1246,13 @@ export function startOrchestratorRun(
       orchestratorSessionId: input.orchestratorSessionId,
       task: input.task,
       mode,
-      phase: mode === 'pair' ? 'running' : 'planning',
+      phase: mode === 'plan' ? 'planning' : 'running',
       round: 0,
-      maxRounds: Math.min(roundsLimit, Math.max(1, Math.trunc(input.maxRounds ?? defaultRounds))),
+      // A committee always has its two rounds: the answers, then the vote.
+      maxRounds: mode === 'committee' ? 2 : Math.min(roundsLimit, Math.max(1, Math.trunc(input.maxRounds ?? defaultRounds))),
       subtasks: [],
       ...(mode === 'pair' ? { pairRounds: [] } : {}),
+      ...(mode === 'committee' ? { committee: { members: committeeMembers, stage: 'answers' as const } } : {}),
       coordinatorProvider: orchestratorProvider,
       coordinatorSessionId: input.orchestratorSessionId,
     },
@@ -1043,6 +1265,7 @@ export function startOrchestratorRun(
     reports: [],
     coordinatorSessions: {},
     ...(mode === 'pair' ? { pairWriterReports: [] } : {}),
+    ...(mode === 'committee' ? { committeeAnswers: committeeMembers.map(() => null) } : {}),
   };
   runs.set(state.run.id, state);
   save(state);

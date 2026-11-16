@@ -64,15 +64,16 @@ function readTask(value: unknown): string {
 }
 
 function readMode(value: unknown): OrchestratorRunMode {
-  if (value === undefined || value === 'plan' || value === 'pair') {
+  if (value === undefined || value === 'plan' || value === 'pair' || value === 'committee') {
     return value ?? 'plan';
   }
-  throw new AppError('mode must be "plan" or "pair".', { code: 'INVALID_REQUEST_BODY', statusCode: 400 });
+  throw new AppError('mode must be "plan", "pair" or "committee".', { code: 'INVALID_REQUEST_BODY', statusCode: 400 });
 }
 
 /** A pair run allows more rounds than a plan run: each of its rounds is only two turns. */
 function readMaxRounds(value: unknown, mode: OrchestratorRunMode): number | undefined {
-  if (value === undefined) {
+  // A committee always runs its two fixed rounds (answers, then the vote).
+  if (value === undefined || mode === 'committee') {
     return undefined;
   }
   const limit = mode === 'pair' ? PAIR_MAX_ROUNDS_LIMIT : ORCHESTRATOR_MAX_ROUNDS_LIMIT;

@@ -70,3 +70,40 @@ test('a pair run shows each round\'s writer, reviewer, verdict and findings, and
   assert.equal(screen.getAllByText(/reviewer, read only · Claude/).length, 2);
   assert.ok(screen.getByRole('button', { name: 'Continue now' }));
 });
+
+test('a committee run shows its stages, members\' turns and every claim with its votes and outcome', async () => {
+  orchestratorApi.latestRun.mockResolvedValue(answer({
+    id: 'run-2',
+    orchestratorSessionId: 'lead',
+    task: 'Which cache?',
+    mode: 'committee',
+    phase: 'done',
+    round: 2,
+    maxRounds: 2,
+    summary: 'Use Redis.',
+    subtasks: [
+      { title: 'Answer — claude', role: 'orchestrator', access: 'read', round: 1, status: 'done', provider: 'claude', committeePart: 'answer' },
+      { title: 'Answer — codex', role: 'hands', access: 'read', round: 1, status: 'done', provider: 'codex', committeePart: 'answer' },
+      { title: 'Vote — claude', role: 'orchestrator', access: 'read', round: 2, status: 'done', provider: 'claude', committeePart: 'vote' },
+      { title: 'Vote — codex', role: 'hands', access: 'read', round: 2, status: 'done', provider: 'codex', committeePart: 'vote' },
+    ],
+    committee: {
+      members: ['claude', 'codex'],
+      stage: 'summary',
+      claims: [
+        { id: 1, text: 'Redis fits', votes: { claude: 'agree', codex: 'agree' }, outcome: 'consensus' },
+        { id: 2, text: 'Memcached is enough', votes: { claude: 'disagree', codex: 'agree' }, outcome: 'disputed' },
+      ],
+    },
+  }));
+  render(<OrchestratorPlanPanel sessionId="lead" onOpenSubtaskSession={() => undefined} />);
+
+  await screen.findByText('Redis fits');
+  assert.ok(screen.getByText('Independent answers'));
+  assert.ok(screen.getByText('Vote'));
+  assert.ok(screen.getByText('✓2 ✗0 ?0'));
+  assert.ok(screen.getByText('all agree'));
+  assert.ok(screen.getByText('disputed'));
+  assert.equal(screen.getAllByText(/— answer, read only/).length, 2);
+  assert.ok(screen.getByText('Use Redis.'));
+});
