@@ -59,6 +59,18 @@
 | 20 | Linux-контейнер с виртуальным экраном + MCP (Docker Desktop + WSL2) | supercorp-ai/computer-use-mcp, образ cua linux | C | Только браузер/Linux — почти дублирует Browser Use |
 | 21 | Движок UFO для чтения дерева элементов окна Windows как отдельный MCP-инструмент | microsoft/UFO | C | Отдельная работа |
 
+### Nod (n8n-io/nod) — 2026-11-18
+
+Nod — отдельный продукт команды n8n: личный агент, работающий на своей машине, с approval-flow, хранением секретов и учётом расходов. Это не инструмент автоматизации (как основной n8n), а готовый агент — архитектурно ближе всего к нашему оркестратору. Код не переносим, только идеи.
+
+| # | Что | Приоритет | Как ложится на ClaudeKOT |
+|---|---|---|---|
+| 22 | Vault для секретов: пароли/коды/карты вводятся на сайтах напрямую, не проходя через контекст модели | B | Актуально при добавлении computer use / browser-автоматизации (п.18-19 выше) — секреты не должны попадать в историю чата или в промпт |
+| 23 | Approval-flow для чувствительных действий: агент готовит черновик (письмо, сообщение, платёж) и отправляет только после явного подтверждения пользователя | A | Сверить с текущим permission-flow оркестратора — risky-действия (отправка, удаление, платежи) должны всегда идти через подтверждение, а не только read/write-разделение подзадач |
+| 24 | Лимит расходов в месяц + лог действий/стоимости по каждому провайдеру | B | Расширение экрана лимитов (п.11-12 выше): не только % использования подписки, но и дневной/месячный бюджет с отсечкой |
+| 25 | Память агента — заметки видимы и редактируемы пользователем, а не скрыты внутри модели | C | Если оркестратор заведёт долгоживущую память между задачами — хранить её как читаемый файл, а не в скрытом состоянии |
+| 26 | Собственная оценка безопасности (без независимой проверки): слабая модель пропустила 8 небезопасных действий из 240 — предупреждение, что safety-check на суждении модели ненадёжен сам по себе | — | Урок, не функция: approval-flow (п.23) не должен держаться только на решении модели — нужен явный список действий, требующих подтверждения человека, а не "модель сама решит, опасно ли" |
+
 ## Чего не брать
 
 - Прокси «подписка → API», пулы и ротация аккаунтов (CLIProxyAPI, CCS в режиме прокси, relay).
@@ -77,4 +89,4 @@
 
 ## Источники
 
-orca: github.com/stablyai/orca · paseo: github.com/getpaseo/paseo · claudexor: github.com/razzant/claudexor · duo: github.com/Audatic07/duo · multiagents: github.com/zetbrush/multiagents · maestro: github.com/josstei/maestro-orchestrate · claude-codex-gemini: github.com/Z-M-Huang/claude-codex-gemini · agent-team: github.com/nekocode/agent-team · handoff: github.com/TStansel/handoff · codex-mode: github.com/bambushu/codex-mode · desktop-cc-gui: github.com/zhukunpenglinyutong/desktop-cc-gui · harnss: github.com/OpenSource03/harnss · acp-ui: github.com/formulahendry/acp-ui · emdash: github.com/generalaction/emdash · cua: github.com/trycua/cua · computer-use-mcp: github.com/supercorp-ai/computer-use-mcp · jam: github.com/Dag7/jam · cortex: github.com/CortexPrism/cortex · OmniParser: github.com/microsoft/OmniParser · UI-TARS: github.com/bytedance/UI-TARS-desktop · UFO: github.com/microsoft/UFO · Agent S: github.com/simular-ai/Agent-S · правила Anthropic: code.claude.com/docs/en/legal-and-compliance
+orca: github.com/stablyai/orca · paseo: github.com/getpaseo/paseo · claudexor: github.com/razzant/claudexor · duo: github.com/Audatic07/duo · multiagents: github.com/zetbrush/multiagents · maestro: github.com/josstei/maestro-orchestrate · claude-codex-gemini: github.com/Z-M-Huang/claude-codex-gemini · agent-team: github.com/nekocode/agent-team · handoff: github.com/TStansel/handoff · codex-mode: github.com/bambushu/codex-mode · desktop-cc-gui: github.com/zhukunpenglinyutong/desktop-cc-gui · harnss: github.com/OpenSource03/harnss · acp-ui: github.com/formulahendry/acp-ui · emdash: github.com/generalaction/emdash · cua: github.com/trycua/cua · computer-use-mcp: github.com/supercorp-ai/computer-use-mcp · jam: github.com/Dag7/jam · cortex: github.com/CortexPrism/cortex · OmniParser: github.com/microsoft/OmniParser · UI-TARS: github.com/bytedance/UI-TARS-desktop · UFO: github.com/microsoft/UFO · Agent S: github.com/simular-ai/Agent-S · nod: github.com/n8n-io/nod · правила Anthropic: code.claude.com/docs/en/legal-and-compliance
